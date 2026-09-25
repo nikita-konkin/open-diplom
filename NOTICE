@@ -1,0 +1,8 @@
+Открытый диплом (open-diplom)
+Copyright 2026 Nikita Konkin and contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The distribution bundles Apache Tomcat, Apache POI and Apache PDFBox,
+developed at The Apache Software Foundation (https://www.apache.org/),
+and the SQLite JDBC driver by Xerial (Apache License 2.0).

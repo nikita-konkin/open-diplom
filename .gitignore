@@ -1,0 +1,12 @@
+target/
+dist/
+data/
+open-diplom.properties
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.iml
+# Real student data must never be committed; tests build workbooks in memory
+*.xlsx
+*.xls
