@@ -44,8 +44,8 @@ final class HomePage extends HttpServlet {
             .append("учебного плана, а без него считаются по часам и помечаются для проверки.</p>")
             .append("<form method=\"post\" action=\"/import\" enctype=\"multipart/form-data\">")
             .append("<label>Ведомость</label><input type=\"file\" name=\"statement\" accept=\".xls,.xlsx\" required>")
-            .append("<label>Учебный план (необязательно)</label>")
-            .append("<input type=\"file\" name=\"curriculum\" accept=\".xls,.xlsx\">")
+            .append("<label>Учебный план (необязательно): Excel или PDF, сохранённый из «Планов»</label>")
+            .append("<input type=\"file\" name=\"curriculum\" accept=\".xls,.xlsx,.pdf\">")
             .append("<br><button>Прочитать</button></form></section>");
         body.append("<section><h2>Калибровка принтера</h2>")
             .append("<form method=\"get\" action=\"/test-sheet.pdf\">")

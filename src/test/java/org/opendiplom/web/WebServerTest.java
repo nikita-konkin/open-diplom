@@ -3,6 +3,7 @@ package org.opendiplom.web;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.opendiplom.Books.row;
 import static org.opendiplom.Books.student;
 
@@ -14,12 +15,15 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.opendiplom.Books;
+import org.opendiplom.PlanPdfs;
 import org.opendiplom.Settings;
+import org.opendiplom.printing.Fonts;
 import org.opendiplom.storage.Database;
 
 /** Through real HTTP, as a browser sends it. */
@@ -101,6 +105,59 @@ final class WebServerTest {
         assertFalse(
             page.substring(page.indexOf("<h2>Оценки</h2>")).contains("Математика_дисциплина_3"),
             "The grades table kept the credits counted from hours instead of the curriculum ones"
+        );
+    }
+
+    @Test
+    void cannotRefuseCurriculumSavedToPdf() throws Exception {
+        final Optional<Path> font = Fonts.serif(null);
+        assumeTrue(font.isPresent(), "No Cyrillic serif font on this machine");
+        final String page = upload(
+            "Ведомость.xlsx",
+            Books.statement(student("Тестов Т. Т.", row("Математика", 108, null, 5, null))),
+            PlanPdfs.plan(font.get())
+        ).body();
+        assertTrue(
+            page.contains("PDF, страница 1") && page.contains("ИНФОРМАЦИОННЫЕ СИСТЕМЫ И ТЕХНОЛОГИИ")
+                && page.contains("Математика_дисциплина_16"),
+            "A curriculum in PDF was not read, or its title and credits were not shown"
+        );
+    }
+
+    @Test
+    void cannotLeaveXmlFieldsEmptyWhenPlanHasThem() throws Exception {
+        final Optional<Path> font = Fonts.serif(null);
+        assumeTrue(font.isPresent(), "No Cyrillic serif font on this machine");
+        final ByteArrayOutputStream body = new ByteArrayOutputStream();
+        part(body, "curriculum", "План.pdf", PlanPdfs.plan(font.get()));
+        body.write(("--" + BOUNDARY + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        final String page = HttpClient.newHttpClient().send(
+            HttpRequest.newBuilder(URI.create(this.address + "xml/plan"))
+                .header("Content-Type", "multipart/form-data; boundary=" + BOUNDARY)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+        ).body();
+        // as the 2026 files and printed supplements have them
+        for (final String value : new String[] {
+            "09.03.02 Информационные системы и технологии", "Интеллектуальные информационные системы и технологии",
+            "бакалавр", "очная", "4 года", "103", "1500 ак.час", "24", "9",
+        }) {
+            assertTrue(page.contains("value=\"" + value + "\""), "The field was not filled from the plan: " + value);
+        }
+        assertTrue(page.contains("value=\"\" required>"), "The chairman of the commission, absent from plans, got a value");
+    }
+
+    @Test
+    void cannotHideWhyCurriculumWasNotRead() throws Exception {
+        final String page = upload(
+            "Ведомость.xlsx",
+            Books.statement(student("Тестов Т. Т.", row("Математика", 108, null, 5, null))),
+            PlanPdfs.scan()
+        ).body();
+        assertTrue(
+            page.substring(0, page.indexOf("<h2>Зачётные единицы</h2>")).contains("похоже, это скан"),
+            "The reason an uploaded plan was not read is not shown above the tables"
         );
     }
 

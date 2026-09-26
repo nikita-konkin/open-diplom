@@ -69,7 +69,10 @@ public final class Program {
         private Object finalCredits;
         private String gekChairman;
 
-        /** Code and name from the curriculum header: «09.03.02 ИНФОРМАЦИОННЫЕ СИСТЕМЫ И ТЕХНОЛОГИИ». */
+        /**
+         * Code and name from the curriculum header, the name as supplements print it:
+         * «09.03.02 Информационные системы и технологии».
+         */
         public Builder direction(final String value) {
             this.direction = value;
             return this;
@@ -153,8 +156,8 @@ public final class Program {
                     problems.add(
                         "Профиль совпадает с наименованием направления подготовки. "
                             + "В поле направления укажите наименование из шапки учебного "
-                            + "плана (например, «09.03.02 ИНФОРМАЦИОННЫЕ СИСТЕМЫ И "
-                            + "ТЕХНОЛОГИИ»), а профиль — в отдельном поле"
+                            + "плана (например, «09.03.02 Информационные системы и "
+                            + "технологии»), а профиль — в отдельном поле"
                     );
                 }
             }

@@ -46,6 +46,7 @@ public final class WebServer {
         this.add(context, "/", new HomePage(settings, database), null);
         this.add(context, "/import", new ImportPage(database), uploads);
         this.add(context, "/xml", new XmlPage(), uploads);
+        this.add(context, "/xml/plan", new XmlPlanPage(), uploads);
         this.add(context, "/test-sheet.pdf", new TestSheetPage(settings), null);
         this.add(context, "/health", new HttpServlet() {
             private static final long serialVersionUID = 1L;

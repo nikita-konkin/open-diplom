@@ -7,6 +7,7 @@ open-diplom.properties
 .idea/
 .vscode/
 *.iml
-# Real student data must never be committed; tests build workbooks in memory
+# Real student data must never be committed; tests build workbooks and PDFs in memory
 *.xlsx
 *.xls
+*.pdf

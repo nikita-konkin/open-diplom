@@ -66,21 +66,38 @@ final class ImportPage extends HttpServlet {
         }
         Responses.html(
             response, HttpServletResponse.SC_OK,
-            Html.page("Импорт ведомости", report(statement, curriculum, checks))
+            Html.page("Импорт ведомости", report(statement, curriculum, plan == null ? null : planProblem, checks))
         );
     }
 
+    /**
+     * @param planProblem why an uploaded plan was not read, {@code null} when none was uploaded
+     */
     private static String report(
-        final StatementImport statement, final Curriculum curriculum, final List<CreditCheck> checks
+        final StatementImport statement, final Curriculum curriculum, final String planProblem,
+        final List<CreditCheck> checks
     ) {
         final StringBuilder body = new StringBuilder("<h1>Ведомость прочитана</h1>");
         body.append("<p>Студентов: ").append(statement.students().size())
             .append(", предметов: ").append(statement.labels().size());
         if (curriculum != null) {
-            body.append(". З.е. из учебного плана, лист «").append(Html.escape(curriculum.sheet()))
-                .append("»");
+            body.append(". З.е. из учебного плана (").append(Html.escape(curriculum.origin())).append(")");
         }
         body.append(". Импорт сохранён в промежуточной зоне.</p>");
+        if (curriculum == null && planProblem != null) {
+            // otherwise the reason hides in the notes of every subject
+            body.append("<p class=\"note\">З.е. посчитаны по часам ведомости: ")
+                .append(Html.escape(planProblem)).append(".</p>");
+        }
+        if (curriculum != null && !curriculum.title().fields().isEmpty()) {
+            // the direction and the profile are separate fields of a supplement (B-25)
+            body.append("<h2>Шапка учебного плана</h2><table>");
+            for (final Map.Entry<String, String> field : curriculum.title().fields().entrySet()) {
+                body.append("<tr><th>").append(Html.escape(field.getKey())).append("</th><td>")
+                    .append(Html.escape(field.getValue())).append("</td></tr>");
+            }
+            body.append("</table>");
+        }
         body.append("<h2>Зачётные единицы</h2><div class=\"scroll\"><table><tr><th>Предмет</th>")
             .append("<th>По часам</th><th>По плану</th><th>Итог</th><th>Источник</th><th>Проверить</th></tr>");
         for (final CreditCheck check : checks) {
