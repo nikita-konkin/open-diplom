@@ -46,7 +46,7 @@ public final class TestSheet {
                 ),
             };
             for (int line = 0; line < steps.length; ++line) {
-                sheet.text(steps[line], 40, 80 + line * 8, 11);
+                sheet.text(steps[line], 40, 72 + line * 8, 11);
             }
             return sheet.pdf();
         }

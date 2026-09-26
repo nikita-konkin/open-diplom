@@ -1,6 +1,7 @@
 package org.opendiplom.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.opendiplom.Books.row;
 import static org.opendiplom.Books.student;
@@ -12,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Collections;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,11 +49,17 @@ final class WebServerTest {
     }
 
     private HttpResponse<String> upload(final String fileName, final byte[] content) throws Exception {
+        return this.upload(fileName, content, null);
+    }
+
+    private HttpResponse<String> upload(final String fileName, final byte[] content, final byte[] plan)
+        throws Exception {
         final ByteArrayOutputStream body = new ByteArrayOutputStream();
-        body.write(("--" + BOUNDARY + "\r\nContent-Disposition: form-data; name=\"statement\"; filename=\""
-            + fileName + "\"\r\nContent-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-        body.write(content);
-        body.write(("\r\n--" + BOUNDARY + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        part(body, "statement", fileName, content);
+        if (plan != null) {
+            part(body, "curriculum", "План.xlsx", plan);
+        }
+        body.write(("--" + BOUNDARY + "--\r\n").getBytes(StandardCharsets.UTF_8));
         return HttpClient.newHttpClient().send(
             HttpRequest.newBuilder(URI.create(this.address + "import"))
                 .header("Content-Type", "multipart/form-data; boundary=" + BOUNDARY)
@@ -59,6 +67,15 @@ final class WebServerTest {
                 .build(),
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
         );
+    }
+
+    private static void part(
+        final ByteArrayOutputStream body, final String name, final String fileName, final byte[] content
+    ) throws Exception {
+        body.write(("--" + BOUNDARY + "\r\nContent-Disposition: form-data; name=\"" + name + "\"; filename=\""
+            + fileName + "\"\r\nContent-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+        body.write(content);
+        body.write("\r\n".getBytes(StandardCharsets.UTF_8));
     }
 
     private String home() throws Exception {
@@ -72,6 +89,19 @@ final class WebServerTest {
     void cannotLoseCyrillicFileNameOfUpload() throws Exception {
         upload("Ведомость ИСТ-43.xlsx", Books.statement(student("Тестов Т. Т.", row("Математика", 108, null, 5, null))));
         assertTrue(home().contains("Ведомость ИСТ-43.xlsx"), "A Cyrillic file name was garbled on the way to the database");
+    }
+
+    @Test
+    void cannotShowGradesUnderCreditsCountedFromHours() throws Exception {
+        final String page = upload(
+            "Ведомость.xlsx",
+            Books.statement(student("Тестов Т. Т.", row("Математика", 108, null, 5, null))),
+            Books.curriculum(Collections.singletonMap("Математика", 4))
+        ).body();
+        assertFalse(
+            page.substring(page.indexOf("<h2>Оценки</h2>")).contains("Математика_дисциплина_3"),
+            "The grades table kept the credits counted from hours instead of the curriculum ones"
+        );
     }
 
     @Test

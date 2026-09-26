@@ -6,7 +6,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.opendiplom.imports.CreditCheck;
 import org.opendiplom.imports.Curriculum;
 import org.opendiplom.imports.StatementImport;
@@ -90,13 +92,18 @@ final class ImportPage extends HttpServlet {
                 .append("</td><td class=\"note\">").append(Html.escape(check.notes()))
                 .append("</td></tr>");
         }
+        // grades are shown under the settled labels, the ones the supplement will carry
+        final Map<String, String> settled = new HashMap<>();
+        for (final CreditCheck check : checks) {
+            settled.put(check.label(), check.settled());
+        }
         body.append("</table></div><h2>Оценки</h2><div class=\"scroll\"><table><tr><th>Предмет</th>");
         for (final String student : statement.students()) {
             body.append("<th>").append(Html.escape(student)).append("</th>");
         }
         body.append("</tr>");
         for (final String label : statement.labels()) {
-            body.append("<tr><td>").append(Html.escape(label)).append("</td>");
+            body.append("<tr><td>").append(Html.escape(settled.getOrDefault(label, label))).append("</td>");
             for (final String student : statement.students()) {
                 final Object grade = statement.grade(student, label);
                 body.append("<td>").append(grade == null ? "" : Html.escape(Cells.text(grade))).append("</td>");
