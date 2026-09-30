@@ -32,6 +32,15 @@ java -jar target/open-diplom.jar
 
 Поставка без установленной Java: `scripts/build-dist.sh` собирает папку `dist/open-diplom` — урезанный рантайм, программу и запускатели `open-diplom.cmd` (Windows) и `open-diplom.sh`.
 
+На сервере с Docker — контейнер (сборка образа прогоняет все тесты):
+
+```sh
+docker build -t open-diplom .
+docker run -d -p 8090:8090 -v "$PWD/data":/data open-diplom
+```
+
+Папка `data` на хосте должна принадлежать uid 1000. Настройки — через `-e JAVA_OPTS="-Dopendiplom.context-path=/open-diplom"`.
+
 ## Настройки
 
 Файл `open-diplom.properties` в рабочей папке или параметры `-Dopendiplom.<имя>=…`:
