@@ -1,4 +1,4 @@
-package org.opendiplom.imports;
+package org.opendiplom.plans;
 
 import java.util.LinkedHashMap;
 import java.util.List;

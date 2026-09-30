@@ -38,6 +38,6 @@ final class DatabaseTest {
     @Test
     void cannotApplyMigrationTwice() throws Exception {
         Database.open(this.url());
-        assertEquals(1, Database.open(this.url()).version(), "Reopening the database re-applied its migrations");
+        assertEquals(2, Database.open(this.url()).version(), "Reopening the database re-applied its migrations");
     }
 }

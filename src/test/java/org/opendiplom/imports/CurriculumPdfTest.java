@@ -12,12 +12,16 @@ import static org.opendiplom.Books.student;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.opendiplom.Books;
 import org.opendiplom.PlanPdfs;
+import org.opendiplom.plans.PlanRow;
+import org.opendiplom.plans.PlanTitle;
+import org.opendiplom.plans.PlanTotals;
 import org.opendiplom.printing.Fonts;
 import org.opendiplom.sheets.WorkbookException;
 
@@ -136,6 +140,80 @@ final class CurriculumPdfTest {
         assertTrue(
             String.join(" ", totals.problems()).contains("не сходятся"),
             "The operator was not told why contact hours are missing: " + totals.problems()
+        );
+    }
+
+    @Test
+    void cannotLoseColumnsOfPdfElement() throws Exception {
+        assertEquals(
+            "Б.1.1.1 | Математика | [1,2, , , , 2] | 16 1 15 | 576 36 540 200 340",
+            describe(element(plan(), "Математика")),
+            "The index, forms of control, credits or hours of a PDF row were not read column by column"
+        );
+    }
+
+    @Test
+    void cannotLoseColumnsOfWorkbookElement() throws Exception {
+        assertEquals(
+            "Б.1.1.1 | Математика | [1,2, , , , 2] | 16 1 15 | 576 36 540 200 340",
+            describe(element(Curriculum.read(numbered()), "Математика")),
+            "The index, forms of control, credits or hours of a workbook row were not read by the column numbers"
+        );
+    }
+
+    @Test
+    void cannotLoseFacultativeIndexTypedAsNumber() throws Exception {
+        assertEquals(
+            "1 | Теория игр | [, 3, , , ] | 3 — — | 108 — — — —",
+            describe(element(Curriculum.read(numbered()), "Теория игр")),
+            "A facultative indexed by the number 1 lost its index or its columns"
+        );
+    }
+
+    @Test
+    void cannotChangeCreditsOfWorkbookWithColumnNumbers() throws Exception {
+        assertEquals(
+            16.0, Curriculum.read(numbered()).credits().get("математика"),
+            "Reading the columns by their numbers changed the credits a statement is settled with"
+        );
+    }
+
+    private static PlanRow element(final Curriculum plan, final String name) {
+        return plan.rows().stream().filter(row -> row.name().equals(name)).findFirst()
+            .orElseThrow(() -> new AssertionError("No row «" + name + "» in " + plan.rows().size() + " rows"));
+    }
+
+    /** Index, name, forms of control, credits and hours of a row. */
+    private static String describe(final PlanRow row) {
+        return String.join(
+            " | ", row.index(), row.name(), row.controls().toString(), numbers(row.creditColumns()),
+            numbers(row.hours())
+        );
+    }
+
+    private static String numbers(final List<Double> values) {
+        return values.stream().map(value -> value == null ? "—" : PlanTotals.number(value))
+            .collect(Collectors.joining(" "));
+    }
+
+    /**
+     * A workbook as «Планы» saves it: the columns numbered under the titles,
+     * the department also numbered 3, the facultative index typed as a number.
+     */
+    private static byte[] numbered() {
+        return Books.book(
+            new Object[] {"", PlanPdfs.DIRECTION},
+            new Object[] {"Индекс", "Структура ОП", "Кафедра", "РАСПРЕДЕЛЕНИЕ ПО СЕМЕСТРАМ", null, null, null, null,
+                "Объем частей ОП\nв зачетных единицах", null, null, "Объем частей ОП\nв часах"},
+            new Object[] {"", "", "", "Экзамены", "Зачеты", "Зачеты с оценкой", "КП", "КР", "Всего", "Экзамены",
+                "Учебные занятия", "Всего", "Экзамены", "Учебные занятия", "Контактная работа",
+                "Самостоятельная работа"},
+            new Object[] {1, 2, 3, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+            new Object[] {"Блок 1. Дисциплины (модули)", null, null, null, null, null, null, null, 16, 1, 15, 576},
+            new Object[] {"Б.1.1.1", "Математика", "Кафедра", "1, 2", null, null, null, 2, 16, 1, 15, 576, 36, 540,
+                200, 340},
+            new Object[] {"Факультативные дисциплины"},
+            new Object[] {1, "Теория игр", "Кафедра", null, 3, null, null, null, 3, null, null, 108}
         );
     }
 

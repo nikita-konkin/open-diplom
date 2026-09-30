@@ -21,6 +21,12 @@ import org.opendiplom.storage.Database;
  */
 public final class WebServer {
     private static final long MB = 1024L * 1024L;
+    /**
+     * A plan corrected by hand posts 17 fields a row, some 1200 for a
+     * bachelor plan. Tomcat 10.1.60 takes 10000 by default; set here so that
+     * an upgrade lowering the default does not cut long plans silently.
+     */
+    private static final int MAX_PARAMETERS = 10_000;
 
     private final Tomcat tomcat = new Tomcat();
     private final Connector connector = new Connector();
@@ -34,6 +40,7 @@ public final class WebServer {
         this.connector.setProperty("address", settings.address());
         this.connector.setURIEncoding("UTF-8");
         this.connector.setMaxPostSize((int) (settings.maxUploadMb() * MB));
+        this.connector.setMaxParameterCount(MAX_PARAMETERS);
         this.connector.setProperty("server", "open-diplom");
         this.tomcat.getService().addConnector(this.connector);
         this.tomcat.setConnector(this.connector);
@@ -45,6 +52,9 @@ public final class WebServer {
         );
         this.add(context, "/", new HomePage(settings, database), null);
         this.add(context, "/import", new ImportPage(database), uploads);
+        this.add(
+            context, "/plans/*", new PlansPage(database, settings.dataFolder().resolve("staging")), uploads
+        );
         this.add(context, "/xml", new XmlPage(), uploads);
         this.add(context, "/xml/plan", new XmlPlanPage(), uploads);
         this.add(context, "/test-sheet.pdf", new TestSheetPage(settings), null);
@@ -76,7 +86,7 @@ public final class WebServer {
         final Context context, final String path, final HttpServlet servlet,
         final MultipartConfigElement uploads
     ) {
-        final String name = path.equals("/") ? "home" : path.substring(1);
+        final String name = path.equals("/") ? "home" : path.substring(1).replace("/*", "");
         final Wrapper wrapper = Tomcat.addServlet(context, name, servlet);
         if (uploads != null) {
             wrapper.setMultipartConfigElement(uploads);

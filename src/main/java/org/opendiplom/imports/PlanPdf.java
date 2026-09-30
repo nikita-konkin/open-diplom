@@ -19,6 +19,7 @@ import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImage;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
+import org.opendiplom.plans.PlanRow;
 import org.opendiplom.sheets.Cells;
 import org.opendiplom.sheets.WorkbookException;
 
@@ -118,7 +119,7 @@ final class PlanPdf {
             }
             boolean indexed = false;
             for (final PlanRow element : elements) {
-                indexed |= !element.index.isEmpty();
+                indexed |= !element.index().isEmpty();
             }
             return new PlanPdf(elements, title, first, indexed);
         } catch (final InvalidPasswordException error) {
@@ -188,6 +189,13 @@ final class PlanPdf {
                 }
                 final int position = numbered.indexOf(name);
                 final float[] index = position > 0 ? numbered.get(position - 1) : name;
+                // the forms of control stand between the name and the credits
+                final List<float[]> controls = new ArrayList<>(
+                    numbered.subList(position + 1, Math.max(position + 1, numbered.indexOf(column)))
+                );
+                while (controls.size() > PlanRow.CONTROLS) {
+                    controls.remove(0);
+                }
                 // «Объем частей ОП в часах» stands next to the credits title
                 List<float[]> hours = Collections.emptyList();
                 for (int line = Math.max(0, head - 2); line < below; ++line) {
@@ -197,7 +205,10 @@ final class PlanPdf {
                         break;
                     }
                 }
-                rows(glyphs, grid, middle(lines.get(below).get(0)), index, name, column, hours, elements);
+                rows(
+                    glyphs, grid, middle(lines.get(below).get(0)), index, name,
+                    new Columns(controls, within(numbered, grid, credits), hours), elements
+                );
                 for (int line = 0; line < head; ++line) {
                     pieces.addAll(runs(lines.get(line), FIELD_GAP));
                 }
@@ -207,10 +218,23 @@ final class PlanPdf {
         return false;
     }
 
+    /** Columns of the values of a row, each as its left and right edges. */
+    private static final class Columns {
+        final List<float[]> controls;
+        final List<float[]> credits;
+        final List<float[]> hours;
+
+        Columns(final List<float[]> controls, final List<float[]> credits, final List<float[]> hours) {
+            this.controls = controls;
+            this.credits = credits;
+            this.hours = hours;
+        }
+    }
+
     /** Rows of the table below the column numbers. */
     private static void rows(
         final List<Glyph> glyphs, final Grid grid, final float numbers, final float[] index,
-        final float[] name, final float[] credits, final List<float[]> hours, final List<PlanRow> elements
+        final float[] name, final Columns columns, final List<PlanRow> elements
     ) {
         final List<Float> rules = new ArrayList<>();
         for (final float rule : Grid.crossing(grid.horizontal, (name[0] + name[1]) / 2)) {
@@ -227,16 +251,21 @@ final class PlanPdf {
             if (element.isEmpty()) {
                 continue;
             }
-            final List<Double> values = new ArrayList<>();
-            for (final float[] column : hours) {
-                values.add(value(glyphs, grid, column, top, bottom));
+            final String code = apart ? text(glyphs, index[0], index[1], top, bottom) : "";
+            // only an element has forms of control; the total row has their counts there
+            final List<String> controls = new ArrayList<>();
+            for (final float[] column : code.isEmpty() ? Collections.<float[]>emptyList() : columns.controls) {
+                controls.add(PlanRow.semesters(text(glyphs, column[0], column[1], top, bottom)));
             }
-            elements.add(new PlanRow(
-                apart ? text(glyphs, index[0], index[1], top, bottom) : "",
-                element,
-                value(glyphs, grid, credits, top, bottom),
-                values
-            ));
+            final List<Double> credits = new ArrayList<>();
+            for (final float[] column : columns.credits) {
+                credits.add(value(glyphs, grid, column, top, bottom));
+            }
+            final List<Double> hours = new ArrayList<>();
+            for (final float[] column : columns.hours) {
+                hours.add(value(glyphs, grid, column, top, bottom));
+            }
+            elements.add(new PlanRow(code, element, controls, credits, hours));
         }
     }
 

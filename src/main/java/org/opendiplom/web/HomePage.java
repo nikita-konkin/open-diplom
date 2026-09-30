@@ -39,6 +39,9 @@ final class HomePage extends HttpServlet {
             .append(" · шрифт для печати: ")
             .append(font.map(p -> Html.escape(p.getFileName())).orElse("не найден"))
             .append("</p>");
+        body.append("<section><h2><a href=\"/plans\">Учебные планы</a></h2>")
+            .append("<p>Планы по годам набора и формам обучения, с редакциями, проверкой контрольных сумм ")
+            .append("и сравнением с планом прошлого года.</p></section>");
         body.append("<section><h2>Импорт ведомости</h2>")
             .append("<p>Ведомость «Деканата» (.xls или .xlsx, лист на студента). З.е. берутся из ")
             .append("учебного плана, а без него считаются по часам и помечаются для проверки.</p>")

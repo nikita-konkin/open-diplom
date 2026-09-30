@@ -1,4 +1,4 @@
-package org.opendiplom.imports;
+package org.opendiplom.plans;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -20,8 +20,6 @@ import org.opendiplom.sheets.Cells;
 public final class PlanTotals {
     private static final Pattern BLOCK = Pattern.compile("^блок ([123])\\b");
     private static final String PROGRAM = "объем образовательной программы";
-    private static final int HOURS = 5;
-    private static final int CONTACT = 3;
 
     private final Double program;
     private final Double practices;
@@ -40,15 +38,15 @@ public final class PlanTotals {
         this.problems = Collections.unmodifiableList(problems);
     }
 
-    static PlanTotals of(final List<PlanRow> rows) {
+    public static PlanTotals of(final List<PlanRow> rows) {
         final Double[] blocks = new Double[4];
         PlanRow total = null;
         for (final PlanRow row : rows) {
-            final String label = Cells.collapse(row.name.toLowerCase(Locale.ROOT).replace('ё', 'е'));
+            final String label = Cells.collapse(row.name().toLowerCase(Locale.ROOT).replace('ё', 'е'));
             final Matcher block = BLOCK.matcher(label);
             if (block.find()) {
                 final int number = Integer.parseInt(block.group(1));
-                blocks[number] = blocks[number] == null ? row.credits : blocks[number];
+                blocks[number] = blocks[number] == null ? row.credits() : blocks[number];
             }
             if (total == null && label.contains(PROGRAM)) {
                 total = row;
@@ -57,7 +55,7 @@ public final class PlanTotals {
         final List<String> problems = new ArrayList<>();
         final boolean blocked = blocks[1] != null && blocks[2] != null && blocks[3] != null;
         final Double sum = blocked ? blocks[1] + blocks[2] + blocks[3] : null;
-        Double program = total == null ? null : total.credits;
+        Double program = total == null ? null : total.credits();
         if (program != null && sum != null && !program.equals(sum)) {
             problems.add(
                 "Объём программы " + number(program) + " з.е. не равен сумме блоков " + number(sum)
@@ -83,19 +81,19 @@ public final class PlanTotals {
      * + учебные занятия, учебные занятия = контактная + самостоятельная.
      */
     private static Double contact(final PlanRow total, final List<String> problems) {
-        if (total == null || total.hours.size() < HOURS || total.hours.subList(0, HOURS).contains(null)) {
+        if (total == null || total.hours().contains(null)) {
             problems.add("Аудиторные часы не найдены: в итоговой строке плана нет часов контактной работы");
             return null;
         }
-        final List<Double> hours = total.hours;
+        final List<Double> hours = total.hours();
         if (hours.get(0) != hours.get(1) + hours.get(2)
-            || hours.get(2) != hours.get(CONTACT) + hours.get(CONTACT + 1)) {
+            || hours.get(2) != hours.get(PlanRow.CONTACT) + hours.get(PlanRow.CONTACT + 1)) {
             problems.add(
                 "Аудиторные часы не определены: часы итоговой строки плана не сходятся (" + hours + ")"
             );
             return null;
         }
-        return hours.get(CONTACT);
+        return hours.get(PlanRow.CONTACT);
     }
 
     /** «240», «4,5». */

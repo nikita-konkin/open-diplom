@@ -19,7 +19,7 @@ import java.util.List;
  */
 public final class Database {
     /** Migrations in the order they are applied; never edit an applied one. */
-    private static final List<String> MIGRATIONS = Arrays.asList("V1__import.sql");
+    private static final List<String> MIGRATIONS = Arrays.asList("V1__import.sql", "V2__curricula.sql");
 
     private final String url;
 
@@ -72,7 +72,8 @@ public final class Database {
             for (int number = applied; number < MIGRATIONS.size(); ++number) {
                 final String name = MIGRATIONS.get(number);
                 try (Statement statement = connection.createStatement()) {
-                    for (final String sql : script(name).split(";")) {
+                    // a «;» in a comment must not end a statement
+                    for (final String sql : script(name).replaceAll("(?m)^\\s*--.*$", "").split(";")) {
                         if (!sql.isBlank()) {
                             statement.execute(sql);
                         }

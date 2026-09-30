@@ -7,7 +7,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Pattern;
+import org.opendiplom.plans.PlanRow;
+import org.opendiplom.plans.PlanTitle;
+import org.opendiplom.plans.PlanTotals;
 import org.opendiplom.sheets.Cells;
 import org.opendiplom.sheets.Sheet;
 import org.opendiplom.sheets.WorkbookException;
@@ -34,25 +36,27 @@ public final class Curriculum {
     private static final String PROGRAM = "объем образовательной программы";
     /** Columns to look through for the five hours of the program total. */
     private static final int HOURS_SPAN = 30;
-    private static final int HOURS = 5;
+    /** Rows below the titles to look through for the row of column numbers. */
+    private static final int NUMBERS_SPAN = 15;
     private static final int NEAR_KEY = 10;
-    private static final Pattern NOT_KEY = Pattern.compile("[^0-9a-zа-я]+");
 
     private final Map<String, Double> credits;
     private final String sheet;
     private final String origin;
     private final PlanTitle title;
+    private final List<PlanRow> rows;
     private final PlanTotals totals;
 
     private Curriculum(
         final Map<String, Double> credits, final String sheet, final String origin, final PlanTitle title,
-        final PlanTotals totals
+        final List<PlanRow> rows
     ) {
         this.credits = Collections.unmodifiableMap(credits);
         this.sheet = sheet;
         this.origin = origin;
         this.title = title;
-        this.totals = totals;
+        this.rows = Collections.unmodifiableList(rows);
+        this.totals = PlanTotals.of(rows);
     }
 
     /**
@@ -106,7 +110,7 @@ public final class Curriculum {
                 }
                 return new Curriculum(
                     credits, sheet.name(), "лист «" + sheet.name() + "»", PlanTitle.of(pieces),
-                    PlanTotals.of(rows(sheet, Math.max(name[0], credit[0]) + 1, name[1], credit[1]))
+                    rows(sheet, Math.max(name[0], credit[0]) + 1, name[1], credit[1])
                 );
             }
         }
@@ -118,8 +122,13 @@ public final class Curriculum {
     }
 
     /**
-     * Rows of a sheet for the totals: blocks are in the index column, and the
+     * Rows of a sheet: blocks and the total are in the index column, and the
      * program total has its titles in one row and the numbers in the next.
+     *
+     * <p>Under the titles «Планы» numbers the columns; the forms of control
+     * are the last numbered columns before the credits, the credits and the
+     * hours are the numbered columns under their titles. A sheet without the
+     * numbers gives the total credits and the first hours found.
      */
     private static List<PlanRow> rows(final Sheet sheet, final int start, final int name, final int credit) {
         int hours = -1;
@@ -133,24 +142,87 @@ public final class Curriculum {
                 }
             }
         }
+        int first = start;
+        List<Integer> controls = Collections.emptyList();
+        List<Integer> credits = Collections.singletonList(credit);
+        List<Integer> hourColumns = Collections.emptyList();
+        for (int row = start; row < Math.min(start + NUMBERS_SPAN, sheet.rows().size()); ++row) {
+            if (Double.valueOf(1).equals(Cells.number(sheet.cell(row, 0)))
+                && Double.valueOf(2).equals(Cells.number(sheet.cell(row, name)))) {
+                final List<Integer> numbered = new ArrayList<>();
+                for (int column = 0; column < sheet.width(); ++column) {
+                    if (Cells.number(sheet.cell(row, column)) != null) {
+                        numbered.add(column);
+                    }
+                }
+                controls = last(numbered, name, credit, PlanRow.CONTROLS);
+                credits = first(numbered, credit, hours < 0 ? sheet.width() : hours, PlanRow.CREDITS);
+                hourColumns = hours < 0 ? hourColumns : first(numbered, hours, sheet.width(), PlanRow.HOURS);
+                first = row + 1;
+                break;
+            }
+        }
         final List<PlanRow> rows = new ArrayList<>();
-        for (int row = start; row < sheet.rows().size(); ++row) {
+        for (int row = first; row < sheet.rows().size(); ++row) {
             final String label = label(sheet, row, name);
             if (label.isEmpty()) {
                 continue;
             }
+            final String element = Cells.text(sheet.cell(row, name));
+            final String index = element.isEmpty() ? "" : index(sheet, row, name);
             final int numbers = title(label).contains(PROGRAM) && Cells.number(sheet.cell(row, credit)) == null
                 && row + 1 < sheet.rows().size() && label(sheet, row + 1, name).isEmpty() ? row + 1 : row;
+            final List<String> forms = new ArrayList<>();
+            for (final int column : index.isEmpty() ? Collections.<Integer>emptyList() : controls) {
+                forms.add(PlanRow.semesters(sheet.cell(numbers, column)));
+            }
+            final List<Double> units = new ArrayList<>();
+            for (final int column : credits) {
+                units.add(Cells.number(sheet.cell(numbers, column)));
+            }
             final List<Double> values = new ArrayList<>();
-            for (int column = hours; hours >= 0 && column < hours + HOURS_SPAN && values.size() < HOURS; ++column) {
-                final Double value = Cells.number(sheet.cell(numbers, column));
-                if (value != null) {
-                    values.add(value);
+            if (hourColumns.isEmpty()) {
+                for (int column = hours; hours >= 0 && column < hours + HOURS_SPAN
+                    && values.size() < PlanRow.HOURS; ++column) {
+                    final Double value = Cells.number(sheet.cell(numbers, column));
+                    if (value != null) {
+                        values.add(value);
+                    }
+                }
+            } else {
+                for (final int column : hourColumns) {
+                    values.add(Cells.number(sheet.cell(numbers, column)));
                 }
             }
-            rows.add(new PlanRow("", label, Cells.number(sheet.cell(numbers, credit)), values));
+            rows.add(new PlanRow(index, element.isEmpty() ? label : element, forms, units, values));
+            // below the total «Планы» counts hours per week, which are not rows of the plan
+            if (title(label).contains(PROGRAM)) {
+                break;
+            }
         }
         return rows;
+    }
+
+    /** Up to a count of the numbered columns in [from, to), the first ones. */
+    private static List<Integer> first(final List<Integer> numbered, final int from, final int to, final int count) {
+        final List<Integer> found = new ArrayList<>();
+        for (final int column : numbered) {
+            if (from <= column && column < to && found.size() < count) {
+                found.add(column);
+            }
+        }
+        return found;
+    }
+
+    /** Up to a count of the numbered columns strictly between two, the last ones. */
+    private static List<Integer> last(final List<Integer> numbered, final int after, final int before, final int count) {
+        final List<Integer> found = new ArrayList<>();
+        for (final int column : numbered) {
+            if (after < column && column < before) {
+                found.add(column);
+            }
+        }
+        return found.subList(Math.max(0, found.size() - count), found.size());
     }
 
     /** The first text of a row up to the name column: an index, a name, a block or the total. */
@@ -164,12 +236,23 @@ public final class Curriculum {
         return "";
     }
 
+    /** The index left of the name: «Б1.О.01», or «1» of a facultative typed as a number. */
+    private static String index(final Sheet sheet, final int row, final int name) {
+        for (int column = 0; column < name; ++column) {
+            final String text = Cells.text(sheet.cell(row, column));
+            if (!text.isEmpty()) {
+                return text;
+            }
+        }
+        return "";
+    }
+
     private static Curriculum pdf(final PlanPdf plan) throws WorkbookException {
         final Map<String, Double> credits = new LinkedHashMap<>();
         for (final PlanRow element : plan.elements()) {
             // block totals have no index and are not in the name column of a workbook
-            if (element.credits != null && (!plan.indexed() || !element.index.isEmpty())) {
-                credits.merge(nameKey(element.name), element.credits, Double::sum);
+            if (element.credits() != null && (!plan.indexed() || !element.index().isEmpty())) {
+                credits.merge(nameKey(element.name()), element.credits(), Double::sum);
             }
         }
         if (credits.isEmpty()) {
@@ -178,9 +261,7 @@ public final class Curriculum {
             );
         }
         final String page = "страница " + plan.page();
-        return new Curriculum(
-            credits, page, "PDF, " + page, PlanTitle.of(plan.title()), PlanTotals.of(plan.elements())
-        );
+        return new Curriculum(credits, page, "PDF, " + page, PlanTitle.of(plan.title()), plan.elements());
     }
 
     /** Sheet the credits were read from; for a PDF, its page. */
@@ -196,6 +277,11 @@ public final class Curriculum {
     /** Direction, profile and the rest of the title above the tables. */
     public PlanTitle title() {
         return this.title;
+    }
+
+    /** Rows of the table in the order printed: blocks, parts, elements and the program total. */
+    public List<PlanRow> rows() {
+        return this.rows;
     }
 
     /** Volumes of the program, practices, attestation and contact hours from the totals. */
@@ -245,8 +331,7 @@ public final class Curriculum {
 
     /** Name reduced for comparison: case, ё, punctuation and spaces. */
     public static String nameKey(final Object name) {
-        final String text = Cells.raw(name).toLowerCase(Locale.ROOT).replace('ё', 'е');
-        return Cells.collapse(NOT_KEY.matcher(text).replaceAll(" "));
+        return PlanRow.key(Cells.raw(name));
     }
 
     private static String title(final Object value) {
