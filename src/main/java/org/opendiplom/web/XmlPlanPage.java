@@ -44,7 +44,7 @@ final class XmlPlanPage extends HttpServlet {
             body.append("<section class=\"error\">")
                 .append(Html.escape(String.join("\n", plan.totals().problems()))).append("</section>");
         }
-        body.append(XmlPage.form(values, sources)).append("<p><a href=\"/\">На главную</a></p>");
+        body.append(XmlPage.form(values, sources)).append("<p><a href=\"./\">На главную</a></p>");
         Responses.html(response, HttpServletResponse.SC_OK, Html.page(XmlPage.TITLE, body.toString()));
     }
 }

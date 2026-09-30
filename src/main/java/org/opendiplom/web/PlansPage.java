@@ -61,7 +61,7 @@ final class PlansPage extends HttpServlet {
     @Override
     protected void doGet(final HttpServletRequest request, final HttpServletResponse response)
         throws IOException, ServletException {
-        final Matcher route = ROUTE.matcher(request.getRequestURI());
+        final Matcher route = ROUTE.matcher(path(request));
         try {
             if (!route.matches() || route.group(1) != null) {
                 response.sendError(HttpServletResponse.SC_NOT_FOUND);
@@ -80,7 +80,7 @@ final class PlansPage extends HttpServlet {
     @Override
     protected void doPost(final HttpServletRequest request, final HttpServletResponse response)
         throws IOException, ServletException {
-        final Matcher route = ROUTE.matcher(request.getRequestURI());
+        final Matcher route = ROUTE.matcher(path(request));
         try {
             if (!route.matches()) {
                 response.sendError(HttpServletResponse.SC_NOT_FOUND);
@@ -103,7 +103,7 @@ final class PlansPage extends HttpServlet {
         final StringBuilder body = new StringBuilder("<h1>").append(TITLE).append("</h1>")
             .append("<section><h2>Загрузить план</h2><p>PDF, сохранённый из «Планов», или Excel. Скан не ")
             .append("читается: откройте план этой программы за другой год или другой формы и нажмите ")
-            .append("«Создать на основе».</p><form method=\"post\" action=\"/plans/upload\" ")
+            .append("«Создать на основе».</p><form method=\"post\" action=\"plans/upload\" ")
             .append("enctype=\"multipart/form-data\"><input type=\"file\" name=\"plan\" accept=\".pdf,.xls,.xlsx\" ")
             .append("required><br><button>Прочитать</button></form></section>");
         final List<Curricula.Edition> editions = new Curricula(this.database).all();
@@ -117,7 +117,7 @@ final class PlansPage extends HttpServlet {
                 body.append("<tr><td>").append(Html.escape(edition.header.code() + " " + edition.header.profile()))
                     .append("</td><td>").append(Html.escape(edition.header.studyForm()))
                     .append("</td><td>").append(Html.escape(edition.header.year()))
-                    .append("</td><td><a href=\"/plans/").append(edition.id).append("\">").append(edition.edition)
+                    .append("</td><td><a href=\"plans/").append(edition.id).append("\">").append(edition.edition)
                     .append("</a></td><td>").append(Html.escape(source(edition)))
                     .append("</td><td").append(edition.errors > 0 ? " class=\"error\"" : "").append(">")
                     .append(edition.errors).append("</td><td>").append(Html.escape(PlanView.time(edition.createdAt)))
@@ -201,7 +201,9 @@ final class PlansPage extends HttpServlet {
         Files.deleteIfExists(folder.resolve(CONTENT));
         Files.deleteIfExists(folder.resolve(NAME));
         Files.deleteIfExists(folder);
-        response.sendRedirect("/plans/" + saved.id + (saved.unchanged ? "?unchanged=1" : ""));
+        response.sendRedirect(
+            request.getContextPath() + "/plans/" + saved.id + (saved.unchanged ? "?unchanged=1" : "")
+        );
     }
 
     private void preview(
@@ -217,7 +219,7 @@ final class PlansPage extends HttpServlet {
             body.append("<section class=\"error\">Заполните: ").append(Html.escape(String.join(", ", missing)))
                 .append("</section>");
         }
-        body.append("<form method=\"post\" action=\"/plans/save\"><section><h2>Шапка</h2>")
+        body.append("<form method=\"post\" action=\"plans/save\"><section><h2>Шапка</h2>")
             .append("<input type=\"hidden\" name=\"staging\" value=\"").append(id).append("\">")
             .append(headerFields(header))
             .append("<label>Примечание (для журнала)</label><input type=\"text\" name=\"note\" value=\"\">")
@@ -251,13 +253,13 @@ final class PlansPage extends HttpServlet {
         }
         final Curricula.Edition latest = curricula.latest(edition.header);
         if (latest != null && !latest.id.equals(id)) {
-            body.append("<p class=\"note\">Есть более новая редакция: <a href=\"/plans/").append(latest.id)
+            body.append("<p class=\"note\">Есть более новая редакция: <a href=\"plans/").append(latest.id)
                 .append("\">").append(latest.edition).append("</a>.</p>");
         }
         body.append("<section>").append(PlanView.header(edition.header)).append("<p class=\"muted\">Источник: ")
             .append(Html.escape(source(edition))).append(". Сохранено ").append(Html.escape(PlanView.time(edition.createdAt)))
-            .append(".</p><p><a href=\"/plans/").append(id).append("/edit\">Править</a></p>")
-            .append("<form method=\"get\" action=\"/plans/").append(id).append("/derive\">")
+            .append(".</p><p><a href=\"plans/").append(id).append("/edit\">Править</a></p>")
+            .append("<form method=\"get\" action=\"plans/").append(id).append("/derive\">")
             .append("<b>Создать на основе</b> план ")
             .append("<select name=\"form\"><option>очная</option><option>заочная</option>")
             .append("<option>очно-заочная</option></select> на год набора ")
@@ -317,7 +319,7 @@ final class PlansPage extends HttpServlet {
             body.append("<h1>Правка учебного плана, редакция ").append(edition.edition).append("</h1>")
                 .append("<p>Сохранение создаст новую редакцию, эта останется как есть.</p>");
         }
-        body.append(new PlanForm(header, rows, "", Collections.emptyList()).html("/plans/" + id + "/edit"));
+        body.append(new PlanForm(header, rows, "", Collections.emptyList()).html("plans/" + id + "/edit"));
         Responses.html(response, HttpServletResponse.SC_OK, Html.page(TITLE, body.toString()));
     }
 
@@ -340,7 +342,9 @@ final class PlansPage extends HttpServlet {
         final boolean save = "save".equals(field(request, "action"));
         if (save && problems.isEmpty() && (check.passed() || !field(request, "force").isEmpty())) {
             final Curricula.Saved saved = curricula.save(form.header(), form.rows(), "manual", null, id, form.note());
-            response.sendRedirect("/plans/" + saved.id + (saved.unchanged ? "?unchanged=1" : ""));
+            response.sendRedirect(
+                request.getContextPath() + "/plans/" + saved.id + (saved.unchanged ? "?unchanged=1" : "")
+            );
             return;
         }
         final StringBuilder body = new StringBuilder("<h1>Правка учебного плана</h1>");
@@ -355,7 +359,7 @@ final class PlansPage extends HttpServlet {
             .append("<section><h2>Изменения</h2>")
             .append(PlanView.diff(PlanDiff.of(PlanStructure.of(curricula.rows(id)), structure), link(base)))
             .append("</section>")
-            .append(form.html("/plans/" + id + "/edit"));
+            .append(form.html("plans/" + id + "/edit"));
         Responses.html(response, HttpServletResponse.SC_OK, Html.page(TITLE, body.toString()));
     }
 
@@ -384,7 +388,7 @@ final class PlansPage extends HttpServlet {
         Responses.html(
             response, HttpServletResponse.SC_BAD_REQUEST,
             Html.page(TITLE, "<h1>" + TITLE + "</h1><section class=\"error\">" + Html.escape(message)
-                + "</section><p><a href=\"/plans\">К учебным планам</a></p>")
+                + "</section><p><a href=\"plans\">К учебным планам</a></p>")
         );
     }
 
@@ -403,6 +407,11 @@ final class PlansPage extends HttpServlet {
             + Html.escape(value) + "\">";
     }
 
+    /** The path within the application, whatever prefix a proxy serves it under. */
+    private static String path(final HttpServletRequest request) {
+        return request.getServletPath() + (request.getPathInfo() == null ? "" : request.getPathInfo());
+    }
+
     private static PlanHeader header(final HttpServletRequest request) {
         return new PlanHeader(
             field(request, "code"), field(request, "direction"), field(request, "profile"),
@@ -417,7 +426,7 @@ final class PlansPage extends HttpServlet {
 
     /** «очная, 2021, редакция 2» as a link. */
     private static String link(final Curricula.Edition edition) {
-        return "«<a href=\"/plans/" + edition.id + "\">" + Html.escape(
+        return "«<a href=\"plans/" + edition.id + "\">" + Html.escape(
             edition.header.studyForm() + ", " + edition.header.year() + ", редакция " + edition.edition
         ) + "</a>»";
     }

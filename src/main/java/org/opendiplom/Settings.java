@@ -65,6 +65,15 @@ public final class Settings {
         );
     }
 
+    /**
+     * The prefix a reverse proxy serves the application under: «» for the
+     * root, «/open-diplom» for https://example.org/open-diplom/.
+     */
+    public String contextPath() {
+        final String path = this.values.getProperty("context-path", "").strip().replaceAll("/+$", "");
+        return path.isEmpty() || path.startsWith("/") ? path : "/" + path;
+    }
+
     /** TrueType font for printing; empty to look for a known one. */
     public String font() {
         return this.values.getProperty("font", "");

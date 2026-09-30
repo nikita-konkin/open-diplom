@@ -31,11 +31,13 @@ public final class WebServer {
     private final Tomcat tomcat = new Tomcat();
     private final Connector connector = new Connector();
     private final String address;
+    private final String contextPath;
 
     public WebServer(final Settings settings, final Database database) throws IOException {
         final Path base = Files.createDirectories(settings.dataFolder().resolve("web"));
         this.tomcat.setBaseDir(base.toString());
         this.address = settings.address();
+        this.contextPath = settings.contextPath();
         this.connector.setPort(settings.port());
         this.connector.setProperty("address", settings.address());
         this.connector.setURIEncoding("UTF-8");
@@ -44,7 +46,8 @@ public final class WebServer {
         this.connector.setProperty("server", "open-diplom");
         this.tomcat.getService().addConnector(this.connector);
         this.tomcat.setConnector(this.connector);
-        final Context context = this.tomcat.addContext("", base.toString());
+        final Context context = this.tomcat.addContext(settings.contextPath(), base.toString());
+        Html.root(settings.contextPath());
         context.setRequestCharacterEncoding("UTF-8");
         context.setResponseCharacterEncoding("UTF-8");
         final MultipartConfigElement uploads = new MultipartConfigElement(
@@ -74,7 +77,7 @@ public final class WebServer {
     public String start() throws LifecycleException {
         this.tomcat.start();
         final String host = "0.0.0.0".equals(this.address) ? "127.0.0.1" : this.address;
-        return "http://" + host + ':' + this.connector.getLocalPort() + '/';
+        return "http://" + host + ':' + this.connector.getLocalPort() + this.contextPath + '/';
     }
 
     public void stop() throws LifecycleException {

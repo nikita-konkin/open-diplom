@@ -23,7 +23,7 @@ final class Responses {
         html(
             response, HttpServletResponse.SC_BAD_REQUEST,
             Html.page(title, "<h1>" + Html.escape(title) + "</h1><section class=\"error\">"
-                + Html.escape(message) + "</section><p><a href=\"/\">Вернуться</a></p>")
+                + Html.escape(message) + "</section><p><a href=\"./\">Вернуться</a></p>")
         );
     }
 

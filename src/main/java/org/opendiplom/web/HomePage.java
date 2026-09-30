@@ -27,7 +27,7 @@ final class HomePage extends HttpServlet {
     @Override
     protected void doGet(final HttpServletRequest request, final HttpServletResponse response)
         throws IOException {
-        if (!"/".equals(request.getRequestURI())) {
+        if (!"/".equals(request.getServletPath()) || request.getPathInfo() != null) {
             response.sendError(HttpServletResponse.SC_NOT_FOUND);
             return;
         }
@@ -39,19 +39,19 @@ final class HomePage extends HttpServlet {
             .append(" · шрифт для печати: ")
             .append(font.map(p -> Html.escape(p.getFileName())).orElse("не найден"))
             .append("</p>");
-        body.append("<section><h2><a href=\"/plans\">Учебные планы</a></h2>")
+        body.append("<section><h2><a href=\"plans\">Учебные планы</a></h2>")
             .append("<p>Планы по годам набора и формам обучения, с редакциями, проверкой контрольных сумм ")
             .append("и сравнением с планом прошлого года.</p></section>");
         body.append("<section><h2>Импорт ведомости</h2>")
             .append("<p>Ведомость «Деканата» (.xls или .xlsx, лист на студента). З.е. берутся из ")
             .append("учебного плана, а без него считаются по часам и помечаются для проверки.</p>")
-            .append("<form method=\"post\" action=\"/import\" enctype=\"multipart/form-data\">")
+            .append("<form method=\"post\" action=\"import\" enctype=\"multipart/form-data\">")
             .append("<label>Ведомость</label><input type=\"file\" name=\"statement\" accept=\".xls,.xlsx\" required>")
             .append("<label>Учебный план (необязательно): Excel или PDF, сохранённый из «Планов»</label>")
             .append("<input type=\"file\" name=\"curriculum\" accept=\".xls,.xlsx,.pdf\">")
             .append("<br><button>Прочитать</button></form></section>");
         body.append("<section><h2>Калибровка принтера</h2>")
-            .append("<form method=\"get\" action=\"/test-sheet.pdf\">")
+            .append("<form method=\"get\" action=\"test-sheet.pdf\">")
             .append("<label>Поправка вправо, мм</label><input type=\"number\" step=\"0.1\" name=\"dx\" value=\"0\">")
             .append("<label>Поправка вниз, мм</label><input type=\"number\" step=\"0.1\" name=\"dy\" value=\"0\">")
             .append("<br><button>Тестовый лист (PDF)</button></form></section>");

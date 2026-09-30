@@ -62,11 +62,11 @@ final class XmlPage extends HttpServlet {
     static String form(final Map<String, String> values, final Map<String, String> sources) {
         final StringBuilder form = new StringBuilder("<section><h2>").append(TITLE).append("</h2>")
             .append("<p>Сводная таблица текущего сервиса и сведения о студентах → файл обмена 3.5.1.</p>")
-            .append("<form method=\"post\" action=\"/xml/plan\" enctype=\"multipart/form-data\">")
+            .append("<form method=\"post\" action=\"xml/plan\" enctype=\"multipart/form-data\">")
             .append("<label>Учебный план (Excel или PDF из «Планов») заполнит поля ниже, кроме председателя ГЭК</label>")
             .append("<input type=\"file\" name=\"curriculum\" accept=\".xls,.xlsx,.pdf\" required>")
             .append(" <button>Заполнить из плана</button></form>")
-            .append("<form method=\"post\" action=\"/xml\" enctype=\"multipart/form-data\">")
+            .append("<form method=\"post\" action=\"xml\" enctype=\"multipart/form-data\">")
             .append("<label>Сводная таблица</label><input type=\"file\" name=\"pivot\" accept=\".xls,.xlsx\" required>")
             .append("<label>Сведения о студентах</label><input type=\"file\" name=\"info\" accept=\".xls,.xlsx\" required>");
         for (final String[] field : FIELDS) {

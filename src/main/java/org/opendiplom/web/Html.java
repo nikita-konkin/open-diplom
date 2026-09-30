@@ -14,7 +14,18 @@ final class Html {
         ".scroll{overflow-x:auto}"
     );
 
+    /**
+     * Where the application is served from, with a slash at the end: links of
+     * the pages are relative to it, so a proxy may serve it under a prefix.
+     */
+    private static volatile String base = "/";
+
     private Html() {
+    }
+
+    /** Sets the prefix, «» or «/open-diplom», once when the server is made. */
+    static void root(final String contextPath) {
+        base = contextPath + "/";
     }
 
     static String escape(final Object value) {
@@ -51,8 +62,9 @@ final class Html {
     static String page(final String title, final String body) {
         return "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
             + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            + "<base href=\"" + escape(base) + "\">"
             + "<title>" + escape(title) + "</title><style>" + STYLE + "</style></head>"
-            + "<body><main><p><a href=\"/\">Открытый диплом</a> · прототип</p>"
+            + "<body><main><p><a href=\"./\">Открытый диплом</a> · прототип</p>"
             + body + "</main></body></html>";
     }
 }
