@@ -111,4 +111,28 @@ final class PlanStructureTest {
             "Brackets without « / » were taken for a choice"
         );
     }
+
+    @Test
+    void cannotPrintPracticeOfTwoPartsAsItsKindOnly() {
+        final PlanStructure plan = PlanStructure.of(Arrays.asList(
+            Plans.row("", "Блок 2. Практика", "", "9 - 9", ""),
+            Plans.row("Б.2.1", "Обязательная часть", "", "9 - 9", ""),
+            Plans.row("Б.2.1.1", "Производственная практика", ";;4,6;;", "9 - 9", ""),
+            Plans.row("Б.2.1.1.1", "Технологическая практика (рассредоточенная)", ";;4;;", "3 - 3", ""),
+            Plans.row("Б.2.1.1.2", "Технологическая практика", ";;6;;", "6 - 6", "")
+        ));
+        assertEquals(
+            "Производственная практика (технологическая практика)", item(plan, "Производственная").printed(),
+            "A practice graded as a whole would print as its kind without its type"
+        );
+    }
+
+    @Test
+    void cannotLoseOnlyDisciplineOfElective() {
+        assertEquals(
+            Collections.singletonList("Интеллектуальные методы обработки данных"),
+            PlanStructure.alternatives("Элективная дисциплина 1 (Интеллектуальные методы обработки данных)"),
+            "An elective whose plan lists one discipline would print as «Элективная дисциплина 1 (…)»"
+        );
+    }
 }

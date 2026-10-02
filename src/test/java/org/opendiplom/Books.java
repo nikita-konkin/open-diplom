@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -23,9 +24,23 @@ public final class Books {
     private Books() {
     }
 
+    public static final String SESSION = "25.08.2021 - 06.02.2022";
+    /** Columns of the student information file. */
+    public static final List<String> INFO = Arrays.asList(
+        "ФИО", "ДатаРожд", "НаименованиеДокПредОбр", "ГодДокПредОбр", "ТемаВКР", "НомерПротоколаГэк",
+        "ДатаРешенияГэк", "ОценкаВКР"
+    );
+
     /** One student of a statement: name for E1 and rows (subject, hours, зачет, экзамен, курсовой). */
     public static Object[] student(final String name, final Object[]... rows) {
-        return new Object[] {name, rows};
+        return new Object[] {name, rows, "Очная", 1, SESSION};
+    }
+
+    /** A student with the header of the sheet: the form in C1, the course and the session of the first semester. */
+    public static Object[] student(
+        final String name, final String form, final int course, final String session, final Object[]... rows
+    ) {
+        return new Object[] {name, rows, form, course, session};
     }
 
     public static Object[] row(final Object... values) {
@@ -44,11 +59,14 @@ public final class Books {
 
     public static byte[] statement(final Workbook book, final List<String> titles, final Object[]... students) {
         for (int number = 0; number < students.length; ++number) {
+            final Object[] student = students[number];
             final Sheet sheet = book.createSheet("Лист" + (number + 1));
-            put(sheet, 0, "", "", "", "", students[number][0]);
-            for (int filler = 1; filler < 6; ++filler) {
-                put(sheet, filler, "-");
-            }
+            put(sheet, 0, "ПГТУ -", "РТФ -", student[2], "", student[0], "", "", "№ " + (3210301000L + number));
+            put(sheet, 1, "РЕЗУЛЬТАТЫ СЕССИИ");
+            put(sheet, 2, "-");
+            put(sheet, 3, "┌ курс", "", "", "┌ семестр", "", "", "┌ сессия");
+            put(sheet, 4, student[3], "", "", 1, "", "", student[4]);
+            put(sheet, 5, "-");
             put(sheet, 6, titles.toArray());
             int line = 7;
             for (final Object[] values : (Object[][]) students[number][1]) {
@@ -56,6 +74,33 @@ public final class Books {
             }
         }
         return save(book);
+    }
+
+    /**
+     * The student information file: the columns {@link #INFO} and then any
+     * others, a row per student.
+     *
+     * @param extra titles of further columns, the values follow those of {@link #INFO}
+     */
+    public static byte[] info(final List<String> extra, final Object[]... students) {
+        final Object[][] rows = new Object[students.length + 1][];
+        final List<String> titles = new ArrayList<>(INFO);
+        titles.addAll(extra);
+        rows[0] = titles.toArray();
+        System.arraycopy(students, 0, rows, 1, students.length);
+        return book(rows);
+    }
+
+    /** A row of the information file: the name and every field filled in. */
+    public static Object[] graduate(final String name, final Object... extra) {
+        final Object[] row = new Object[INFO.size() + extra.length];
+        final Object[] values = {
+            name, LocalDateTime.of(2001, 2, 3, 0, 0), "Аттестат о среднем общем образовании", 2019.0, "Тема",
+            "3", LocalDateTime.of(2026, 6, 24, 0, 0), 5.0,
+        };
+        System.arraycopy(values, 0, row, 0, values.length);
+        System.arraycopy(extra, 0, row, values.length, extra.length);
+        return row;
     }
 
     /** Curriculum: a header, a sub-header «Всего» and a row per element. */

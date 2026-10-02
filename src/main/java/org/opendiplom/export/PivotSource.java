@@ -25,16 +25,9 @@ import org.opendiplom.sheets.WorkbookException;
  */
 public final class PivotSource {
     static final String INDEX = "Дисциплины";
-    static final List<String> REQUIRED = Arrays.asList(
-        "ФИО", "ДатаРожд", "НаименованиеДокПредОбр", "ГодДокПредОбр",
-        "ТемаВКР", "НомерПротоколаГэк", "ДатаРешенияГэк", "ОценкаВКР"
-    );
     static final String THESIS_ROW = "выполнение и защита выпускной квалификационной работы";
     static final String STATE_EXAM_ROW = "подготовка к сдаче и сдача государственного экзамена";
     static final String STATE_EXAM = "Государственный экзамен";
-    /** Year of the previous document that is not known yet, like grade 7. */
-    static final String YEAR_PLACEHOLDER = "1111";
-    private static final Pattern YEAR = Pattern.compile("\\d{4}");
     private static final Pattern WHOLE = Pattern.compile("[+-]?\\d+");
 
     private PivotSource() {
@@ -57,90 +50,18 @@ public final class PivotSource {
             );
         }
         grades.rows.removeIf(row -> row.stream().allMatch(Cells::missing));
-        final Table students = new Table(info);
-        final List<String> absent = REQUIRED.stream()
-            .filter(title -> students.column(title) < 0)
-            .collect(Collectors.toList());
-        if (!absent.isEmpty()) {
-            throw new ValidationProblems(Arrays.asList(
-                "В файле сведений о студентах нет колонок: " + String.join(", ", absent)
-            ));
-        }
-        final int year = today.getYear();
-        final List<String> problems = new ArrayList<>();
+        final StudentInfo students = StudentInfo.read(info, today);
+        final List<String> problems = new ArrayList<>(students.problems());
         final List<Graduate> read = new ArrayList<>();
         final List<String> labels = new ArrayList<>();
         final List<List<String>> people = new ArrayList<>();
-        for (int number = 0; number < students.rows.size(); ++number) {
-            final List<Object> row = students.rows.get(number);
-            if (row.stream().allMatch(Cells::blank)) {
-                continue;
-            }
-            final String line = "строка " + students.lines.get(number) + " файла сведений";
-            final String fullName = Cells.text(value(students, row, "ФИО"));
-            if (fullName.isEmpty()) {
-                problems.add(line + ": не заполнено ФИО");
-                continue;
-            }
-            final String label = fullName + " (" + line + ")";
-            final List<String> mixed = Names.mixedScript(fullName);
-            if (!mixed.isEmpty()) {
-                problems.add(
-                    label + ": в ФИО смешаны латинские и русские буквы ("
-                        + String.join(", ", mixed) + "), исправьте файл"
-                );
-            }
-            final List<String> parts = Cells.words(fullName);
-            if (parts.size() < 2) {
-                problems.add(label + ": ФИО «" + fullName + "»: нужны как минимум фамилия и имя");
-                continue;
-            }
-            final String middle = String.join(" ", parts.subList(2, parts.size()));
-            String birth = "";
-            String decision = "";
-            try {
-                birth = Dates.checked(value(students, row, "ДатаРожд"), "ДатаРожд", 1920, year - 14);
-            } catch (final IllegalArgumentException error) {
-                problems.add(label + ": " + error.getMessage());
-            }
-            try {
-                decision = Dates.checked(
-                    value(students, row, "ДатаРешенияГэк"), "ДатаРешенияГэк", 2000, year + 1
-                );
-            } catch (final IllegalArgumentException error) {
-                problems.add(label + ": " + error.getMessage());
-            }
-            final String previous = Cells.text(value(students, row, "ГодДокПредОбр"));
-            if (!YEAR_PLACEHOLDER.equals(previous) && (!YEAR.matcher(previous).matches()
-                || Integer.parseInt(previous) < 1950 || Integer.parseInt(previous) > year)) {
-                problems.add(
-                    label + ": ГодДокПредОбр должен быть годом из четырёх цифр не позже "
-                        + year + " или заглушкой " + YEAR_PLACEHOLDER + ", получено «" + previous + "»"
-                );
-            }
-            final Map<String, String> texts = new LinkedHashMap<>();
-            for (final String field : Arrays.asList("НаименованиеДокПредОбр", "НомерПротоколаГэк", "ТемаВКР")) {
-                texts.put(field, Cells.text(value(students, row, field)));
-                if (texts.get(field).isEmpty()) {
-                    problems.add(label + ": не заполнено поле " + field);
-                }
-            }
-            final Object thesis = value(students, row, "ОценкаВКР");
-            final Integer thesisGrade = Grades.code(thesis);
-            if (thesisGrade == null) {
-                problems.add(label + ": ОценкаВКР «" + Cells.text(thesis) + "» — допустимы коды 2–7");
-            }
+        for (final StudentInfo.Entry entry : students.entries()) {
             read.add(new Graduate(
-                parts.get(0), parts.get(1), middle, birth, texts.get("НаименованиеДокПредОбр"),
-                previous, decision, texts.get("НомерПротоколаГэк"), texts.get("ТемаВКР"), thesisGrade
+                entry.lastName, entry.firstName, entry.middleName, entry.birthDate, entry.previousDocument,
+                entry.previousYear, entry.gekDate, entry.gekProtocol, entry.thesisTopic, entry.thesisGrade
             ));
-            labels.add(label);
-            people.add(Names.person(parts.get(0), parts.get(1), middle));
-        }
-        if (read.isEmpty() && problems.isEmpty()) {
-            throw new ValidationProblems(Arrays.asList(
-                "В файле сведений о студентах нет ни одной заполненной строки"
-            ));
+            labels.add(entry.label());
+            people.add(entry.key());
         }
         final List<Object> columns = new ArrayList<>(grades.columns);
         columns.remove(index);

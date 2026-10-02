@@ -2,6 +2,7 @@ package org.opendiplom.imports;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,15 +23,20 @@ public final class StatementImport {
     private final Map<String, Map<String, Object>> grades;
     private final Map<String, Double> hours;
     private final Map<String, Integer> ungraded;
+    private final Map<String, StatementReader.StudentSheet> sheets;
+    private final Map<String, List<StudyRecord>> records;
 
     private StatementImport(
         final List<String> labels, final Map<String, Map<String, Object>> grades,
-        final Map<String, Double> hours, final Map<String, Integer> ungraded
+        final Map<String, Double> hours, final Map<String, Integer> ungraded,
+        final Map<String, StatementReader.StudentSheet> sheets, final Map<String, List<StudyRecord>> records
     ) {
         this.labels = Collections.unmodifiableList(labels);
         this.grades = Collections.unmodifiableMap(grades);
         this.hours = Collections.unmodifiableMap(hours);
         this.ungraded = Collections.unmodifiableMap(ungraded);
+        this.sheets = Collections.unmodifiableMap(sheets);
+        this.records = Collections.unmodifiableMap(records);
     }
 
     /**
@@ -45,6 +51,8 @@ public final class StatementImport {
         final Map<String, Map<String, Object>> grades = new TreeMap<>();
         final Map<String, Double> hours = new LinkedHashMap<>();
         final Map<String, Integer> ungraded = new LinkedHashMap<>();
+        final Map<String, StatementReader.StudentSheet> read = new HashMap<>();
+        final Map<String, List<StudyRecord>> records = new HashMap<>();
         for (final Sheet sheet : sheets) {
             final StatementReader.StudentSheet statement = StatementReader.read(sheet);
             if (grades.containsKey(statement.student())) {
@@ -55,7 +63,9 @@ public final class StatementImport {
             }
             final Map<String, Object> own = new LinkedHashMap<>();
             grades.put(statement.student(), own);
-            for (final StudyRecord record : SemesterRecords.of(statement.rows())) {
+            read.put(statement.student(), statement);
+            records.put(statement.student(), SemesterRecords.of(statement.rows()));
+            for (final StudyRecord record : records.get(statement.student())) {
                 final String label = record.label();
                 labels.putIfAbsent(label, Boolean.TRUE);
                 own.put(label, record.grade());
@@ -84,7 +94,7 @@ public final class StatementImport {
                 kept.add(label);
             }
         }
-        return new StatementImport(kept, grades, hours, ungraded);
+        return new StatementImport(kept, grades, hours, ungraded, read, records);
     }
 
     /** Labels «Название_тип_з.е.» in the order subjects first appear. */
@@ -111,5 +121,75 @@ public final class StatementImport {
     /** Number of students with a semester of the label that has no grade. */
     public int ungraded(final String label) {
         return this.ungraded.getOrDefault(label, 0);
+    }
+
+    /** The sheet of a student: its name, study form, number and admission year. */
+    public StatementReader.StudentSheet sheet(final String student) {
+        return this.sheets.get(student);
+    }
+
+    /** Subjects of a student with all their semesters joined, in the order of the statement. */
+    public List<StudyRecord> records(final String student) {
+        return this.records.getOrDefault(student, Collections.emptyList());
+    }
+
+    /** The study form of most sheets, empty when no sheet has one. */
+    public String form() {
+        final List<Object> forms = new ArrayList<>();
+        for (final StatementReader.StudentSheet sheet : this.sheets.values()) {
+            if (!sheet.form().isEmpty()) {
+                forms.add(sheet.form());
+            }
+        }
+        final Object form = common(forms);
+        return form == null ? "" : (String) form;
+    }
+
+    /** The admission year of most sheets, {@code null} when no sheet gives one. */
+    public Integer admissionYear() {
+        final List<Object> years = new ArrayList<>();
+        for (final StatementReader.StudentSheet sheet : this.sheets.values()) {
+            if (sheet.admission() != null) {
+                years.add(sheet.admission());
+            }
+        }
+        return (Integer) common(years);
+    }
+
+    /** Sheets whose study form or admission year differ from the rest of the group, or are missing. */
+    public List<String> headerProblems() {
+        final List<String> problems = new ArrayList<>();
+        final String form = this.form();
+        final Integer year = this.admissionYear();
+        for (final String student : this.students()) {
+            final StatementReader.StudentSheet sheet = this.sheets.get(student);
+            final String where = "Лист «" + sheet.sheet() + "» (" + student + ")";
+            if (sheet.form().isEmpty()) {
+                problems.add(where + ": в ячейке C1 нет формы обучения");
+            } else if (!sheet.form().equals(form)) {
+                problems.add(where + ": форма обучения «" + sheet.form() + "», у группы «" + form + "»");
+            }
+            if (sheet.admission() == null) {
+                problems.add(where + ": не найдены курс и даты первой сессии, год набора не определён");
+            } else if (!sheet.admission().equals(year)) {
+                problems.add(where + ": год набора " + sheet.admission() + " по первой сессии, у группы " + year);
+            }
+        }
+        return problems;
+    }
+
+    /** The value most values have; of equally common ones, the first. */
+    private static Object common(final List<Object> values) {
+        final Map<Object, Integer> counts = new LinkedHashMap<>();
+        for (final Object value : values) {
+            counts.merge(value, 1, Integer::sum);
+        }
+        Object found = null;
+        for (final Map.Entry<Object, Integer> entry : counts.entrySet()) {
+            if (found == null || entry.getValue() > counts.get(found)) {
+                found = entry.getKey();
+            }
+        }
+        return found;
     }
 }

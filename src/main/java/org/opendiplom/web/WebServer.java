@@ -58,6 +58,10 @@ public final class WebServer {
         this.add(
             context, "/plans/*", new PlansPage(database, settings.dataFolder().resolve("staging")), uploads
         );
+        this.add(
+            context, "/graduations/*",
+            new GraduationsPage(database, settings.dataFolder().resolve("staging").resolve("graduations")), uploads
+        );
         this.add(context, "/xml", new XmlPage(), uploads);
         this.add(context, "/xml/plan", new XmlPlanPage(), uploads);
         this.add(context, "/test-sheet.pdf", new TestSheetPage(settings), null);

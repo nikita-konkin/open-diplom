@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 import org.opendiplom.sheets.Cells;
 
 /** Matching of people by name, tolerant to ё, case and Latin lookalike letters. */
-final class Names {
+public final class Names {
     private static final String LATIN = "AaBCcEeHKMOoPpTXxYyËë";
     private static final String CYRILLIC = "АаВСсЕеНКМОоРрТХхУуЁё";
     private static final Pattern MIXED_SCRIPT = Pattern.compile(
@@ -23,7 +23,7 @@ final class Names {
     }
 
     /** Case-, ё- and lookalike-insensitive form of a name. */
-    static String key(final Object text) {
+    public static String key(final Object text) {
         final StringBuilder name = new StringBuilder();
         for (final char letter : Cells.raw(text).toCharArray()) {
             final int lookalike = LATIN.indexOf(letter);
@@ -33,7 +33,7 @@ final class Names {
     }
 
     /** Words mixing Cyrillic and Latin letters, e.g. a Latin Ë in a surname. */
-    static List<String> mixedScript(final String text) {
+    public static List<String> mixedScript(final String text) {
         final List<String> words = new ArrayList<>();
         final Matcher match = MIXED_SCRIPT.matcher(text);
         while (match.find()) {
@@ -43,12 +43,12 @@ final class Names {
     }
 
     /** Surname plus first-name and patronymic initials. */
-    static List<String> person(final String last, final String first, final String middle) {
+    public static List<String> person(final String last, final String first, final String middle) {
         return Arrays.asList(key(last), head(key(first)), head(key(middle)));
     }
 
     /** Key of a pivot column headed «Фамилия И. О.». */
-    static List<String> column(final Object header) {
+    public static List<String> column(final Object header) {
         final String[] words = key(header).split(" ", 2);
         final List<String> initials = new ArrayList<>();
         if (words.length > 1) {
@@ -65,7 +65,7 @@ final class Names {
     }
 
     /** Same surname; an initial missing on either side matches anything. */
-    static boolean compatible(final List<String> column, final List<String> person) {
+    public static boolean compatible(final List<String> column, final List<String> person) {
         if (!column.get(0).equals(person.get(0))) {
             return false;
         }

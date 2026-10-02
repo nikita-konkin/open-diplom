@@ -22,7 +22,10 @@ import org.opendiplom.plans.PlanItem.Section;
  * <p>«Планы» lists a practice as its kind with its types under it:
  * «Производственная практика» → «Преддипломная практика». The 2026
  * supplements print them as «Производственная практика (преддипломная
- * практика)», and so does {@link PlanItem#printed()}.
+ * практика)», and so does {@link PlanItem#printed()}. A kind whose types are
+ * one practice in parts, «Технологическая практика» and «Технологическая
+ * практика (рассредоточенная)», is printed the same way by the shortest type:
+ * a statement may grade the parts together.
  */
 public final class PlanStructure {
     private static final Pattern BLOCK = Pattern.compile("^блок (\\d+)");
@@ -33,6 +36,8 @@ public final class PlanStructure {
     private static final String FACULTATIVE = "факультатив";
     private static final String FACULTATIVE_INDEX = "ФТД";
     private static final String ALTERNATIVE = " / ";
+    /** «Элективная дисциплина 1 (…)»: the brackets hold the choice even when it is one discipline. */
+    private static final Pattern ELECTIVE = Pattern.compile("^(элективн|дисциплин\\S* по выбору)");
 
     private final List<PlanItem> items;
 
@@ -88,6 +93,9 @@ public final class PlanStructure {
             String printed = row.name();
             if (leaf && sections[position] == Section.PRACTICES && parent >= 0 && kinds[parent] == Kind.ELEMENT) {
                 printed = practice(rows.get(parent).name(), row.name());
+            } else if (kinds[position] == Kind.ELEMENT && !leaf && sections[position] == Section.PRACTICES) {
+                final String type = common(rows, parents, position);
+                printed = type == null ? printed : practice(row.name(), type);
             }
             items.add(new PlanItem(
                 position, row, kinds[position], sections[position], parent, leaf, printed,
@@ -175,8 +183,33 @@ public final class PlanStructure {
         return found;
     }
 
+    /**
+     * The name of the type all rows under a row share: the shortest name the
+     * names of the others start with, {@code null} when there is none.
+     */
+    private static String common(final List<PlanRow> rows, final int[] parents, final int position) {
+        final List<String> names = new ArrayList<>();
+        for (int child = 0; child < rows.size(); ++child) {
+            if (parents[child] == position) {
+                names.add(rows.get(child).name());
+            }
+        }
+        String shortest = null;
+        for (final String name : names) {
+            if (shortest == null || PlanRow.key(name).length() < PlanRow.key(shortest).length()) {
+                shortest = name;
+            }
+        }
+        for (final String name : names) {
+            if (shortest == null || !PlanRow.key(name).startsWith(PlanRow.key(shortest))) {
+                return null;
+            }
+        }
+        return shortest;
+    }
+
     /** «Вид (тип)», unless the type already names the kind: «Учебная практика (ознакомительная)». */
-    static String practice(final String kind, final String type) {
+    public static String practice(final String kind, final String type) {
         if (PlanRow.key(type).startsWith(PlanRow.key(kind))) {
             return type;
         }
@@ -194,6 +227,8 @@ public final class PlanStructure {
     /**
      * Disciplines of an elective: «Элективная дисциплина 1 (A / B)» → A, B.
      * The brackets are the outer ones holding « / »; brackets inside a name stay.
+     * An elective whose plan lists one discipline, «Элективная дисциплина 1 (A)»,
+     * has that one: the supplement prints A.
      */
     static List<String> alternatives(final String name) {
         int depth = 0;
@@ -209,7 +244,7 @@ public final class PlanStructure {
                 --depth;
                 if (depth == 0) {
                     final List<String> found = split(name.substring(open + 1, at));
-                    if (found.size() > 1) {
+                    if (found.size() > 1 || ELECTIVE.matcher(PlanRow.key(name.substring(0, open))).find()) {
                         return found;
                     }
                 }

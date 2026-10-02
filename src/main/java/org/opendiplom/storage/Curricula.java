@@ -195,6 +195,14 @@ public final class Curricula {
         );
     }
 
+    /** Editions of all programs for a study form and an admission year, the latest edition first. */
+    public List<Edition> of(final String studyForm, final int year) throws SQLException {
+        return this.query(
+            SELECT + "WHERE c.study_form = ? AND c.admission_year = ? ORDER BY p.code, p.profile, c.edition DESC",
+            studyForm, year
+        );
+    }
+
     /** The latest edition of a curriculum, or {@code null}. */
     public Edition latest(final PlanHeader header) throws SQLException {
         final List<Edition> found = this.query(

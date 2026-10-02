@@ -183,4 +183,50 @@ final class StatementImportTest {
             "The total row of a statement became a subject"
         );
     }
+
+    @Test
+    void cannotMissStudyFormAndAdmissionYearOfGroup() throws Exception {
+        final StatementImport statement = read(Books.statement(
+            student("Андреев А. А.", "Заочная", 1, "25.08.2021 - 06.02.2022", row("Математика", 108, null, 4, null)),
+            student("Борисов Б. Б.", "Заочная", 1, "25.08.2021 - 06.02.2022", row("Математика", 108, null, 5, null))
+        ));
+        assertEquals(
+            "заочная 2021 []", statement.form() + " " + statement.admissionYear() + " " + statement.headerProblems(),
+            "The study form in C1 or the admission year of the first session was not read"
+        );
+    }
+
+    @Test
+    void cannotTakeYearOfTransferForAdmissionYear() throws Exception {
+        final StatementImport statement = read(Books.statement(
+            student("Андреев А. А.", "Очная", 2, "06.02.2023 - 27.08.2023", row("Физика", 108, null, 4, null))
+        ));
+        assertEquals(
+            Integer.valueOf(2021), statement.admissionYear(),
+            "A student who came in the second course in 2023 was not counted as admitted in 2021"
+        );
+    }
+
+    @Test
+    void cannotHideSheetOfAnotherForm() throws Exception {
+        final StatementImport statement = read(Books.statement(
+            student("Андреев А. А.", "Очная", 1, Books.SESSION, row("Математика", 108, null, 4, null)),
+            student("Борисов Б. Б.", "Очная", 1, Books.SESSION, row("Математика", 108, null, 5, null)),
+            student("Васильев В. В.", "Заочная", 1, Books.SESSION, row("Математика", 108, null, 5, null))
+        ));
+        assertTrue(
+            statement.form().equals("очная") && statement.headerProblems().size() == 1
+                && statement.headerProblems().get(0).contains("Васильев В. В."),
+            "A sheet of another study form than the group was not reported: " + statement.headerProblems()
+        );
+    }
+
+    @Test
+    void cannotLoseStudentNumber() throws Exception {
+        final StatementImport statement = read(Books.statement(TWO_SEMESTERS));
+        assertEquals(
+            "3210301000", statement.sheet("Тестов Т. Т.").number(),
+            "The student number of H1 was not read, or kept its «№»"
+        );
+    }
 }
