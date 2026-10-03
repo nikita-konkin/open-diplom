@@ -20,7 +20,9 @@ CREATE TABLE graduation (
 );
 
 -- What the operator decided while matching: a row of the information file,
--- a sheet or a subject, and where it goes. Kept until the graduation is confirmed.
+-- a sheet or a subject, and where it goes. On confirmation the subjects become
+-- links of the program; the choices about students stay with the registered
+-- graduation and come along when the group is loaded again.
 CREATE TABLE staging_choice (
     graduation_id VARCHAR(36) NOT NULL REFERENCES graduation (id),
     item VARCHAR(700) NOT NULL,

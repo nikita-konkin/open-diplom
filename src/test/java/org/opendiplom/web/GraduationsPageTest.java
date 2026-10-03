@@ -30,6 +30,7 @@ import org.opendiplom.Books;
 import org.opendiplom.Plans;
 import org.opendiplom.Settings;
 import org.opendiplom.export.StudentInfo;
+import org.opendiplom.graduation.StudentMatch;
 import org.opendiplom.plans.PlanHeader;
 import org.opendiplom.storage.Curricula;
 import org.opendiplom.storage.Database;
@@ -148,6 +149,43 @@ final class GraduationsPageTest {
             first, this.confirm(again),
             "Loading the same group again made a second graduation instead of replacing the first"
         );
+    }
+
+    @Test
+    void cannotAskAgainWhenFullerStatementComes() throws Exception {
+        // the practice is not graded yet when the first statement comes
+        final Object[] early = student("Андреев А. А.",
+            row("Математика", 252, null, 5, null), row("Математика", 36, null, null, 4), row("Физика", 144, 5, null, null),
+            row("Преддипломная практика", 216, null, null, null), row("Теория игр", 72, "V", null, null));
+        final String match = this.upload(
+            Books.statement(early, studied("Андреев А. Б."), studied("Борисов Б. Б.")),
+            Books.info(Collections.singletonList(StudentInfo.STATE_EXAM),
+                Books.graduate("Андреев Андрей", 5.0), Books.graduate("Борисов Борис Борисович", 4.0))
+        );
+        final Map<String, String> fields = selects(this.get(match).body());
+        for (final String item : fields.keySet()) {
+            if (item.startsWith(StudentMatch.INFO + "андреев")) {
+                fields.put(item, "Андреев А. А.");
+            }
+        }
+        fields.put(StudentMatch.SHEET + "Андреев А. Б.", StudentMatch.EXCLUDED);
+        fields.put("action", "save");
+        this.post(match, fields);
+        final String graduation = this.confirm(match);
+        this.post(graduation, Map.of("chairman", "Председатель П. П."));
+        assertTrue(this.get(graduation).body().contains("<td>ошибки</td>"), "A practice without a grade was not reported");
+        final String again = this.upload(
+            Books.statement(studied("Борисов Б. Б."), studied("Андреев А. Б."), studied("Андреев А. А.")),
+            Books.info(Collections.singletonList(StudentInfo.STATE_EXAM),
+                Books.graduate("Борисов Борис Борисович", 4.0), Books.graduate("Андреев Андрей", 5.0))
+        );
+        final String page = this.get(again).body();
+        assertTrue(
+            page.contains("связано вручную: 1") && page.contains("не включён в выпуск: 1") && page.contains("value=\"confirm\""),
+            "The operator was asked again about the students of a group loaded with a fuller statement"
+        );
+        assertEquals(graduation, this.confirm(again), "The fuller statement did not replace the graduates in place");
+        assertEquals(200, this.get(graduation + "/xml").statusCode(), "The grade that came later did not reach the XML");
     }
 
     @Test

@@ -14,12 +14,18 @@ import java.util.Map;
 import java.util.UUID;
 import org.opendiplom.catalog.GraduateRecord;
 import org.opendiplom.catalog.ResultRecord;
+import org.opendiplom.graduation.StudentMatch;
 import org.opendiplom.graduation.SubjectMatch;
 
 /**
  * Graduations (ADR-0009): a draft in the staging zone while the operator
  * matches its files, then graduates and results in the registry. Confirming
  * the same group of the same curriculum again replaces its graduates.
+ *
+ * <p>A statement often comes before every subject is graded, and the group is
+ * loaded again with a fuller one. So the operator's choices about students
+ * stay with the registered graduation and go to the next loading of the
+ * group; the choices about subjects become links of the program.
  */
 public final class Graduations {
     public static final String STAGING = "staging";
@@ -70,7 +76,11 @@ public final class Graduations {
         }
     }
 
-    /** Starts a graduation in the staging zone and returns its identifier. */
+    /**
+     * Starts a graduation in the staging zone and returns its identifier. The
+     * choices about students of the registered graduation of the same group,
+     * form and year come along.
+     */
     public String stage(
         final String groupName, final String studyForm, final Integer admissionYear, final String statementFile,
         final String infoFile
@@ -100,6 +110,23 @@ public final class Graduations {
                 insert.executeUpdate();
             }
             audit(connection, id, "staged", groupName + ": " + statementFile + ", " + infoFile);
+            if (admissionYear != null) {
+                try (PreparedStatement copy = connection.prepareStatement(
+                    "INSERT INTO staging_choice (graduation_id, item, choice) SELECT ?, item, choice FROM staging_choice "
+                        + "WHERE (item LIKE ? OR item LIKE ?) AND graduation_id = (SELECT id FROM graduation "
+                        + "WHERE status = ? AND group_name = ? AND study_form = ? AND admission_year = ? "
+                        + "ORDER BY updated_at DESC LIMIT 1)"
+                )) {
+                    copy.setString(1, id);
+                    copy.setString(2, StudentMatch.INFO + "%");
+                    copy.setString(3, StudentMatch.SHEET + "%");
+                    copy.setString(4, REGISTERED);
+                    copy.setString(5, groupName);
+                    copy.setString(6, studyForm);
+                    copy.setInt(7, admissionYear);
+                    copy.executeUpdate();
+                }
+            }
             connection.commit();
         }
         return id;
@@ -116,7 +143,7 @@ public final class Graduations {
         return this.query("SELECT * FROM graduation ORDER BY updated_at DESC");
     }
 
-    /** What the operator decided while matching, by item. */
+    /** What the operator decided while matching, by item; of a registered graduation, about its students. */
     public Map<String, String> choices(final String id) throws SQLException {
         final Map<String, String> choices = new LinkedHashMap<>();
         try (Connection connection = this.database.connection();
@@ -216,9 +243,10 @@ public final class Graduations {
     }
 
     /**
-     * Writes a staged graduation to the registry and forgets its choices. When
-     * the same group of the same curriculum is there already, its graduates
-     * are replaced and it keeps its identifier and chairman.
+     * Writes a staged graduation to the registry; of its choices, those about
+     * students stay with it. When the same group of the same curriculum is
+     * there already, its graduates and choices are replaced and it keeps its
+     * identifier and chairman.
      *
      * @return the identifier of the registered graduation
      */
@@ -256,6 +284,16 @@ public final class Graduations {
                     update.setString(7, earlier);
                     update.executeUpdate();
                 }
+                delete(connection, "DELETE FROM staging_choice WHERE graduation_id = ?", earlier);
+                try (PreparedStatement move = connection.prepareStatement(
+                    "UPDATE staging_choice SET graduation_id = ? WHERE graduation_id = ? AND (item LIKE ? OR item LIKE ?)"
+                )) {
+                    move.setString(1, earlier);
+                    move.setString(2, id);
+                    move.setString(3, StudentMatch.INFO + "%");
+                    move.setString(4, StudentMatch.SHEET + "%");
+                    move.executeUpdate();
+                }
                 delete(connection, "DELETE FROM staging_choice WHERE graduation_id = ?", id);
                 delete(connection, "DELETE FROM audit WHERE subject = 'graduation' AND subject_id = ?", id);
                 delete(connection, "DELETE FROM graduation WHERE id = ?", id);
@@ -270,7 +308,14 @@ public final class Graduations {
                     update.setString(3, id);
                     update.executeUpdate();
                 }
-                delete(connection, "DELETE FROM staging_choice WHERE graduation_id = ?", id);
+                try (PreparedStatement forget = connection.prepareStatement(
+                    "DELETE FROM staging_choice WHERE graduation_id = ? AND NOT (item LIKE ? OR item LIKE ?)"
+                )) {
+                    forget.setString(1, id);
+                    forget.setString(2, StudentMatch.INFO + "%");
+                    forget.setString(3, StudentMatch.SHEET + "%");
+                    forget.executeUpdate();
+                }
                 audit(connection, id, "registered", "выпускников: " + graduates.size());
             }
             for (final GraduateRecord graduate : graduates) {

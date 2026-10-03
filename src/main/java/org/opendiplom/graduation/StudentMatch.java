@@ -2,9 +2,12 @@ package org.opendiplom.graduation;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.opendiplom.export.Names;
 import org.opendiplom.export.StudentInfo;
 
@@ -15,7 +18,11 @@ import org.opendiplom.export.StudentInfo;
  * grades silently.
  */
 public final class StudentMatch {
-    /** Where a choice about a row of the information file is kept: «info:5». */
+    /**
+     * Where a choice about a row of the information file is kept: «info:иванов
+     * иван иванович». The name, not the line, so that the choice still holds
+     * when the group is loaded again with rows added or moved.
+     */
     public static final String INFO = "info:";
     /** Where a choice about a sheet nobody claims is kept: «sheet:Иванов И. И.». */
     public static final String SHEET = "sheet:";
@@ -54,17 +61,22 @@ public final class StudentMatch {
         public final Status status;
         /** Sheets that fit the row, for the operator to choose from. */
         public final List<String> candidates;
+        private final String item;
 
-        Pair(final StudentInfo.Entry entry, final String student, final Status status, final List<String> candidates) {
+        Pair(
+            final StudentInfo.Entry entry, final String student, final Status status, final List<String> candidates,
+            final String item
+        ) {
             this.entry = entry;
             this.student = student;
             this.status = status;
             this.candidates = Collections.unmodifiableList(candidates);
+            this.item = item;
         }
 
         /** Key of the choice about this pair. */
         public String item() {
-            return this.entry == null ? SHEET + this.student : INFO + this.entry.line;
+            return this.item;
         }
     }
 
@@ -81,8 +93,10 @@ public final class StudentMatch {
     public static StudentMatch of(
         final List<StudentInfo.Entry> entries, final List<String> students, final Map<String, String> choices
     ) {
+        final Map<StudentInfo.Entry, String> items = items(entries);
         final Map<StudentInfo.Entry, List<String>> candidates = new LinkedHashMap<>();
         final Map<StudentInfo.Entry, String> taken = new LinkedHashMap<>();
+        final Set<StudentInfo.Entry> chosen = new HashSet<>();
         for (final StudentInfo.Entry entry : entries) {
             final List<String> exact = new ArrayList<>();
             final List<String> near = new ArrayList<>();
@@ -97,9 +111,10 @@ public final class StudentMatch {
             }
             final List<String> found = exact.isEmpty() ? near : exact;
             candidates.put(entry, found);
-            final String choice = choices.get(INFO + entry.line);
+            final String choice = choices.get(items.get(entry));
             if (choice != null && (EXCLUDED.equals(choice) || students.contains(choice))) {
                 taken.put(entry, choice);
+                chosen.add(entry);
             } else if (found.size() == 1) {
                 taken.put(entry, found.get(0));
             }
@@ -112,29 +127,43 @@ public final class StudentMatch {
         for (final StudentInfo.Entry entry : entries) {
             final String student = taken.get(entry);
             final List<String> found = candidates.get(entry);
-            final boolean chosen = choices.containsKey(INFO + entry.line);
+            final String item = items.get(entry);
             if (EXCLUDED.equals(student)) {
-                pairs.add(new Pair(entry, null, Status.EXCLUDED, found));
+                pairs.add(new Pair(entry, null, Status.EXCLUDED, found, item));
             } else if (student != null && claims.get(student) == 1) {
-                pairs.add(new Pair(entry, student, chosen ? Status.CHOSEN : Status.MATCHED, found));
+                pairs.add(new Pair(entry, student, chosen.contains(entry) ? Status.CHOSEN : Status.MATCHED, found, item));
             } else if (student != null || found.size() > 1) {
                 // a sheet two rows claim belongs to neither until the operator decides
                 final List<String> options = new ArrayList<>(found);
                 if (student != null && !options.contains(student)) {
                     options.add(student);
                 }
-                pairs.add(new Pair(entry, null, Status.AMBIGUOUS, options));
+                pairs.add(new Pair(entry, null, Status.AMBIGUOUS, options, item));
             } else {
-                pairs.add(new Pair(entry, null, Status.NO_STATEMENT, found));
+                pairs.add(new Pair(entry, null, Status.NO_STATEMENT, found, item));
             }
         }
         for (final String student : students) {
             if (!claims.containsKey(student)) {
                 final Status status = EXCLUDED.equals(choices.get(SHEET + student)) ? Status.EXCLUDED : Status.NO_INFO;
-                pairs.add(new Pair(null, student, status, Collections.emptyList()));
+                pairs.add(new Pair(null, student, status, Collections.emptyList(), SHEET + student));
             }
         }
         return new StudentMatch(pairs);
+    }
+
+    /** Choice keys of the rows: the name, with the line only when two rows have the same name. */
+    private static Map<StudentInfo.Entry, String> items(final List<StudentInfo.Entry> entries) {
+        final Map<String, Integer> names = new HashMap<>();
+        for (final StudentInfo.Entry entry : entries) {
+            names.merge(Names.key(entry.fullName), 1, Integer::sum);
+        }
+        final Map<StudentInfo.Entry, String> items = new HashMap<>();
+        for (final StudentInfo.Entry entry : entries) {
+            final String name = Names.key(entry.fullName);
+            items.put(entry, INFO + name + (names.get(name) > 1 ? " #" + entry.line : ""));
+        }
+        return items;
     }
 
     /** Rows of the information file in its order, then the sheets nobody claims. */

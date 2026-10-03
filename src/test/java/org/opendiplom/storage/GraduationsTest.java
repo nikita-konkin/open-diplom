@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -103,6 +104,28 @@ final class GraduationsTest {
             "Б.1.1.2 физика", links.get("дисциплина:астрономия").elementIndex + " "
                 + links.get("дисциплина:астрономия").elementKey,
             "The link the operator confirmed was not kept for the program"
+        );
+    }
+
+    @Test
+    void cannotAskAgainAboutStudentsOnNextLoad() throws Exception {
+        final String first = this.staged();
+        this.graduations.choose(first, Map.of(
+            "info:иванов иван", "Иванов И. П.", "sheet:Иванов И. И.", "-", "subject:дисциплина:астрономия", "-"
+        ), null);
+        final String registered = this.graduations.register(
+            first, Collections.singletonList(graduate(0, "Иванов", 5)), this.programId(), Collections.emptyList()
+        );
+        final String again = this.staged();
+        final Map<String, String> inherited = this.graduations.choices(again);
+        this.graduations.choose(again, Map.of("sheet:Иванов И. И.", ""), null);
+        this.graduations.register(
+            again, Collections.singletonList(graduate(0, "Иванов", 5)), this.programId(), Collections.emptyList()
+        );
+        assertEquals(
+            "{info:иванов иван=Иванов И. П., sheet:Иванов И. И.=-} {info:иванов иван=Иванов И. П.}",
+            new TreeMap<>(inherited) + " " + this.graduations.choices(registered),
+            "The choices about students did not come to the next loading of the group, or the new ones did not replace them"
         );
     }
 

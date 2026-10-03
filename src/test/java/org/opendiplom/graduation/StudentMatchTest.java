@@ -83,13 +83,42 @@ final class StudentMatchTest {
 
     @Test
     void cannotIgnoreOperatorsChoices() throws Exception {
+        final List<String> sheets = Arrays.asList("Иванов И. И.", "Иванов И. П.");
+        final String row = StudentMatch.of(entries("Иванов Иван"), sheets, Map.of()).pairs().get(0).item();
         final StudentMatch match = StudentMatch.of(
-            entries("Иванов Иван"), Arrays.asList("Иванов И. И.", "Иванов И. П."),
-            Map.of(StudentMatch.INFO + 2, "Иванов И. П.", StudentMatch.SHEET + "Иванов И. И.", StudentMatch.EXCLUDED)
+            entries("Иванов Иван"), sheets,
+            Map.of(row, "Иванов И. П.", StudentMatch.SHEET + "Иванов И. И.", StudentMatch.EXCLUDED)
         );
         assertTrue(
             match.resolved() && "CHOSEN Иванов И. П., EXCLUDED Иванов И. И.".equals(statuses(match)),
             "The sheet chosen and the sheet left out by the operator were not taken: " + statuses(match)
+        );
+    }
+
+    @Test
+    void cannotLoseChoiceWhenRowsMove() throws Exception {
+        final List<String> sheets = Arrays.asList("Иванов И. И.", "Иванов И. П.", "Петров П. П.");
+        final String row = StudentMatch.of(entries("Иванов Иван", "Петров Пётр Петрович"), sheets, Map.of())
+            .pairs().get(0).item();
+        final StudentMatch match = StudentMatch.of(
+            entries("Петров Пётр Петрович", "Иванов Иван"), sheets,
+            Map.of(row, "Иванов И. П.", StudentMatch.SHEET + "Иванов И. И.", StudentMatch.EXCLUDED)
+        );
+        assertEquals(
+            "MATCHED Петров П. П., CHOSEN Иванов И. П., EXCLUDED Иванов И. И.", statuses(match),
+            "The operator's choice was lost or went to another graduate when the rows of the file moved"
+        );
+    }
+
+    @Test
+    void cannotGiveChoiceToNamesakeRow() throws Exception {
+        final List<String> sheets = Arrays.asList("Иванов И. И.", "Иванов И. П.");
+        final List<StudentInfo.Entry> rows = entries("Иванов Иван", "Иванов Иван");
+        final String first = StudentMatch.of(rows, sheets, Map.of()).pairs().get(0).item();
+        final StudentMatch match = StudentMatch.of(rows, sheets, Map.of(first, "Иванов И. П."));
+        assertEquals(
+            "CHOSEN Иванов И. П., AMBIGUOUS, NO_INFO Иванов И. И.", statuses(match),
+            "The choice about one of two rows with the same name went to both"
         );
     }
 
