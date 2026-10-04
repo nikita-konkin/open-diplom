@@ -189,6 +189,45 @@ final class GraduationsPageTest {
     }
 
     @Test
+    void cannotPrintBeforeDocumentIsComplete() throws Exception {
+        final String graduation = this.confirm(this.upload(
+            Books.statement(studied("Андреев А. А."), studied("Борисов Б. Б.")), info(true)
+        ));
+        this.post(graduation, Map.of("chairman", "Председатель П. П."));
+        assertTrue(
+            this.get(graduation).body().contains("Готовы к печати: 0 из 2"),
+            "Documents without numbers, date of issue or the organization were ready to print"
+        );
+        this.post("organization", Map.of(
+            "full_name", "федеральное государственное\r\nбюджетное образовательное учреждение", "locality",
+            "г. Йошкар-Ола", "head_last_name", "Петров", "head_first_name", "Пётр", "head_middle_name", "Петрович"
+        ));
+        final HttpResponse<String> given = this.post(graduation + "/numbers",
+            Map.of("numbers", "10001, 10010-10011", "issue_date", "2026-07-03"));
+        final String page = this.get(given.headers().firstValue("Location").orElse("").replaceFirst("^.*?/graduations", "graduations")).body();
+        assertTrue(
+            page.contains("Готовы к печати: 2 из 2") && page.contains("<td>10001</td>") && page.contains("<td>10010</td>")
+                && page.contains("лишние номера не использованы: 10011"),
+            "The numbers with a gap did not go to the graduates in order: " + page
+        );
+        final Matcher card = Pattern.compile("graduations/[0-9a-f-]{36}/graduates/[0-9a-f-]{36}").matcher(page);
+        assertTrue(card.find(), "No card of a graduate on the page");
+        this.post(card.group(), Map.of("reg_number", "10001", "issue_date", "2026-07-03", "honors", "0"));
+        this.post(card.group() + "/duplicate",
+            Map.of("kind", "supplement", "reg_number", "10020", "issue_date", "2026-09-01"));
+        final String cardPage = this.get(card.group()).body();
+        assertTrue(
+            cardPage.contains("снято «с отличием» вопреки расчёту по п. 27")
+                && cardPage.contains("<td>дубликат приложения</td><td>10020</td><td>2026-09-01</td>"),
+            "The operator's decision on honors went without a word, or the duplicate was not issued: " + cardPage
+        );
+        assertEquals(
+            400, this.post(card.group(), Map.of("reg_number", "10010", "issue_date", "2026-07-03")).statusCode(),
+            "The number of another graduate was taken"
+        );
+    }
+
+    @Test
     void cannotExportGraduateWithoutStateExam() throws Exception {
         final String graduation = this.confirm(this.upload(
             Books.statement(studied("Андреев А. А."), studied("Борисов Б. Б.")), info(false)

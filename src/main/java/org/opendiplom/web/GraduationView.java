@@ -4,7 +4,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.opendiplom.catalog.Checks;
+import org.opendiplom.catalog.DocumentRecord;
 import org.opendiplom.catalog.GraduateRecord;
+import org.opendiplom.catalog.Honors;
+import org.opendiplom.catalog.Organization;
 import org.opendiplom.catalog.ResultRecord;
 import org.opendiplom.graduation.StudentMatch;
 import org.opendiplom.graduation.SubjectMatch;
@@ -133,17 +136,20 @@ final class GraduationView {
             + (item.row().credits() == null ? "" : " (" + PlanTotals.number(item.row().credits()) + " з.е.)");
     }
 
-    /** Graduates with how far each is from the supplement. */
+    /** Graduates with how far each is from the XML and from the printed diploma. */
     static String graduates(
-        final String graduation, final List<GraduateRecord> graduates, final List<List<Checks.Finding>> findings
+        final String graduation, final List<GraduateRecord> graduates, final List<List<Checks.Finding>> findings,
+        final List<DocumentRecord> originals, final List<Honors> honors, final List<List<Checks.Finding>> printing
     ) {
         final StringBuilder html = new StringBuilder("<div class=\"scroll\"><table><tr><th>№</th><th>ФИО</th>")
             .append("<th>Номер студента</th><th>Результатов</th><th>Ошибок</th><th>Не завершено</th>")
-            .append("<th>Предупреждений</th><th>Итог</th></tr>");
+            .append("<th>Предупреждений</th><th>Итог</th><th>Рег. номер</th><th>С отличием</th><th>К печати</th></tr>");
         for (int number = 0; number < graduates.size(); ++number) {
             final GraduateRecord graduate = graduates.get(number);
             final List<Checks.Finding> own = findings.get(number);
             final long errors = Checks.count(own, Checks.Level.ERROR);
+            final DocumentRecord document = originals.get(number);
+            final List<Checks.Finding> print = printing.get(number);
             html.append("<tr><td>").append(number + 1).append("</td><td><a href=\"graduations/").append(graduation)
                 .append("/graduates/").append(graduate.id).append("\">").append(Html.escape(graduate.fullName()))
                 .append("</a></td><td>").append(Html.escape(graduate.studentNumber))
@@ -152,9 +158,99 @@ final class GraduationView {
                 .append("</td><td>").append(Checks.count(own, Checks.Level.UNFINISHED))
                 .append("</td><td>").append(Checks.count(own, Checks.Level.WARNING))
                 .append("</td><td>").append(Checks.ready(own) ? "готов" : Checks.exportable(own) ? "не завершено" : "ошибки")
+                .append("</td><td>").append(Html.escape(document.regNumber.isEmpty() ? "—" : document.regNumber))
+                .append("</td><td>").append(Html.escape(honors(document, honors.get(number))))
+                .append("</td><td").append(Checks.ready(print) ? ">готов" : " class=\"note\">замечаний: "
+                    + (Checks.count(print, Checks.Level.ERROR) + Checks.count(print, Checks.Level.UNFINISHED)))
                 .append("</td></tr>");
         }
         return html.append("</table></div>").toString();
+    }
+
+    /** «да», «нет», «да (вручную)», «?» when the rule cannot say yet. */
+    static String honors(final DocumentRecord document, final Honors rule) {
+        if (document.honors != null) {
+            return (document.honors ? "да" : "нет") + " (вручную)";
+        }
+        return rule.proposal == null ? "?" : rule.proposal ? "да" : "нет";
+    }
+
+    /** The numbers and the date of issue of a graduation, and what keeps its documents from printing. */
+    static String documents(
+        final String graduation, final Organization organization, final List<List<Checks.Finding>> printing,
+        final String note
+    ) {
+        final long ready = printing.stream().filter(Checks::ready).count();
+        final StringBuilder html = new StringBuilder("<section><h2>Документы</h2>");
+        if (note != null) {
+            html.append("<p class=\"note\">").append(Html.escape(note)).append("</p>");
+        }
+        if (!organization.missing().isEmpty()) {
+            html.append("<p class=\"error\">Не заполнены <a href=\"organization\">данные вуза</a>: ")
+                .append(Html.escape(String.join(", ", organization.missing()))).append(".</p>");
+        }
+        html.append("<p>Готовы к печати: ").append(ready).append(" из ").append(printing.size())
+            .append(". Печать на бланке появится на следующем этапе.</p>")
+            .append("<form method=\"post\" action=\"graduations/").append(graduation).append("/numbers\">")
+            .append("<label>Регистрационные номера — подряд или с пропусками: «10001–10007, 10010». ")
+            .append("Получат выпускники без номера, по порядку списка</label>")
+            .append("<input type=\"text\" name=\"numbers\">")
+            .append("<label>Дата выдачи — для всех документов выпуска</label><input type=\"date\" name=\"issue_date\">")
+            .append("<br><button>Присвоить</button></form></section>");
+        return html.toString();
+    }
+
+    /** The document of a graduate: number, date, «с отличием» with its reckoning, findings and duplicates. */
+    static String document(
+        final String graduation, final GraduateRecord graduate, final DocumentRecord original, final Honors rule,
+        final List<Checks.Finding> printing, final List<DocumentRecord> all
+    ) {
+        final String action = "graduations/" + graduation + "/graduates/" + graduate.id;
+        final String proposal = rule.proposal == null ? "не рассчитано" : rule.proposal ? "с отличием" : "без отличия";
+        final String current = original.honors == null ? "" : original.honors ? "1" : "0";
+        final StringBuilder html = new StringBuilder("<section><h2>Документ</h2><p class=\"muted\">")
+            .append("Диплом и приложение: один регистрационный номер и одна дата выдачи.</p>")
+            .append("<form method=\"post\" action=\"").append(action).append("\">")
+            .append("<label>Регистрационный номер</label><input type=\"text\" name=\"reg_number\" value=\"")
+            .append(Html.escape(original.regNumber)).append("\">")
+            .append("<label>Дата выдачи</label><input type=\"date\" name=\"issue_date\" value=\"")
+            .append(Html.escape(original.issueDate)).append("\">")
+            .append("<label>С отличием (п. 27 приказа № 670): ").append(Html.escape(rule.explanation)).append("</label>")
+            .append("<select name=\"honors\">")
+            .append(option("", "по расчёту: " + proposal, current))
+            .append(option("1", "с отличием — решение оператора", current))
+            .append(option("0", "без отличия — решение оператора", current))
+            .append("</select><br><button>Сохранить</button></form>")
+            .append("<h3>Проверка для печати</h3>").append(findings(printing));
+        final List<DocumentRecord> duplicates = new ArrayList<>();
+        for (final DocumentRecord document : all) {
+            if (document.duplicate()) {
+                duplicates.add(document);
+            }
+        }
+        html.append("<h3>Дубликаты</h3>");
+        if (duplicates.isEmpty()) {
+            html.append("<p class=\"muted\">Не выдавались.</p>");
+        } else {
+            html.append("<table><tr><th>Что</th><th>Рег. номер</th><th>Дата выдачи</th></tr>");
+            for (final DocumentRecord duplicate : duplicates) {
+                html.append("<tr><td>").append(Html.escape(duplicate.duplicateTitle())).append("</td><td>")
+                    .append(Html.escape(duplicate.regNumber)).append("</td><td>").append(Html.escape(duplicate.issueDate))
+                    .append("</td></tr>");
+            }
+            html.append("</table>");
+        }
+        if (!original.regNumber.isEmpty()) {
+            html.append("<form method=\"post\" action=\"").append(action).append("/duplicate\">")
+                .append("<label>Выдать дубликат взамен № ").append(Html.escape(original.regNumber)).append("</label>")
+                .append("<select name=\"kind\"><option value=\"both\">диплома и приложения</option>")
+                .append("<option value=\"supplement\">только приложения</option>")
+                .append("<option value=\"diploma\">только диплома</option></select>")
+                .append("<label>Регистрационный номер дубликата</label><input type=\"text\" name=\"reg_number\">")
+                .append("<label>Дата выдачи дубликата</label><input type=\"date\" name=\"issue_date\">")
+                .append("<br><button>Выдать дубликат</button></form>");
+        }
+        return html.append("</section>").toString();
     }
 
     /** Findings as a list, errors first. */

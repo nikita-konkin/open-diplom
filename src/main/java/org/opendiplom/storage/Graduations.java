@@ -8,12 +8,14 @@ import java.sql.SQLException;
 import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.opendiplom.catalog.GraduateRecord;
 import org.opendiplom.catalog.ResultRecord;
+import org.opendiplom.export.Names;
 import org.opendiplom.graduation.StudentMatch;
 import org.opendiplom.graduation.SubjectMatch;
 
@@ -33,7 +35,9 @@ public final class Graduations {
 
     private static final Map<String, String> ACTIONS = Map.of(
         "staged", "файлы загружены", "registered", "записан в картотеку",
-        "replaced", "выпускники заменены повторным импортом", "chairman", "председатель ГЭК"
+        "replaced", "выпускники заменены повторным импортом", "chairman", "председатель ГЭК",
+        Documents.NUMBERS, "регистрационные номера и дата выдачи", Documents.DOCUMENT, "документ выпускника",
+        Documents.DUPLICATE, "дубликат"
     );
 
     private final Database database;
@@ -246,7 +250,9 @@ public final class Graduations {
      * Writes a staged graduation to the registry; of its choices, those about
      * students stay with it. When the same group of the same curriculum is
      * there already, its graduates and choices are replaced and it keeps its
-     * identifier and chairman.
+     * identifier and chairman. A graduate found again by the name keeps the
+     * identifier and the documents; the documents of one no longer there go
+     * with the graduate.
      *
      * @return the identifier of the registered graduation
      */
@@ -263,10 +269,30 @@ public final class Graduations {
             final String earlier = earlier(connection, staged);
             final String target = earlier == null ? id : earlier;
             final String now = Instant.now().toString();
+            final Map<GraduateRecord, String> kept = new IdentityHashMap<>();
             if (earlier != null) {
                 delete(connection, "DELETE FROM result WHERE graduate_id IN "
                     + "(SELECT id FROM graduate WHERE graduation_id = ?)", earlier);
-                delete(connection, "DELETE FROM graduate WHERE graduation_id = ?", earlier);
+                final Map<String, String> before = keys(connection, earlier);
+                for (final GraduateRecord graduate : graduates) {
+                    final String key = Names.key(graduate.fullName());
+                    String found = before.remove(key);
+                    if (found == null) {
+                        found = before.remove(key + "|" + graduate.birthDate);
+                    }
+                    if (found != null) {
+                        kept.put(graduate, found);
+                    }
+                }
+                final List<String> freed = new ArrayList<>();
+                for (final String gone : before.values()) {
+                    freed.addAll(Documents.forget(connection, gone));
+                    delete(connection, "DELETE FROM graduate WHERE id = ?", gone);
+                }
+                if (!before.isEmpty()) {
+                    audit(connection, earlier, "replaced", "выпускников больше нет в файлах: " + before.size()
+                        + (freed.isEmpty() ? "" : ", освобождены регистрационные номера: " + String.join(", ", freed)));
+                }
                 try (PreparedStatement update = connection.prepareStatement(
                     "UPDATE graduation SET curriculum_id = ?, study_form = ?, admission_year = ?, statement_file = ?, "
                         + "info_file = ?, updated_at = ? WHERE id = ?"
@@ -319,7 +345,7 @@ public final class Graduations {
                 audit(connection, id, "registered", "выпускников: " + graduates.size());
             }
             for (final GraduateRecord graduate : graduates) {
-                insert(connection, target, graduate);
+                write(connection, target, graduate, kept.get(graduate));
             }
             for (final SubjectMatch.Link link : links) {
                 try (PreparedStatement delete = connection.prepareStatement(
@@ -441,17 +467,51 @@ public final class Graduations {
         }
     }
 
-    private static void insert(final Connection connection, final String graduation, final GraduateRecord graduate)
-        throws SQLException {
-        final String id = UUID.randomUUID().toString();
-        try (PreparedStatement insert = connection.prepareStatement(
-            "INSERT INTO graduate (id, graduation_id, position, last_name, first_name, middle_name, birth_date, "
+    /**
+     * Graduates of a graduation by the key of the name; of namesakes, by the
+     * name with the date of birth, so that neither takes the other's documents.
+     */
+    private static Map<String, String> keys(final Connection connection, final String graduation) throws SQLException {
+        final Map<String, List<String[]>> names = new LinkedHashMap<>();
+        try (PreparedStatement query = connection.prepareStatement(
+            "SELECT id, last_name, first_name, middle_name, birth_date FROM graduate WHERE graduation_id = ?"
+        )) {
+            query.setString(1, graduation);
+            try (ResultSet row = query.executeQuery()) {
+                while (row.next()) {
+                    final String key = Names.key(row.getString(2) + " " + row.getString(3) + " " + row.getString(4));
+                    names.computeIfAbsent(key, any -> new ArrayList<>())
+                        .add(new String[] {row.getString(1), row.getString(5)});
+                }
+            }
+        }
+        final Map<String, String> keys = new LinkedHashMap<>();
+        for (final Map.Entry<String, List<String[]>> name : names.entrySet()) {
+            for (final String[] graduate : name.getValue()) {
+                final String key = name.getValue().size() == 1 ? name.getKey() : name.getKey() + "|" + graduate[1];
+                // namesakes born the same day are told apart by nobody: each stays under its id, to be removed
+                keys.put(keys.containsKey(key) ? "#" + graduate[0] : key, graduate[0]);
+            }
+        }
+        return keys;
+    }
+
+    /** Writes a graduate and its results; {@code id} of the graduate kept from before, {@code null} for a new one. */
+    private static void write(
+        final Connection connection, final String graduation, final GraduateRecord graduate, final String kept
+    ) throws SQLException {
+        final String id = kept == null ? UUID.randomUUID().toString() : kept;
+        try (PreparedStatement insert = connection.prepareStatement(kept != null
+            ? "UPDATE graduate SET graduation_id = ?, position = ?, last_name = ?, first_name = ?, middle_name = ?, "
+                + "birth_date = ?, previous_document = ?, previous_year = ?, gek_date = ?, gek_protocol = ?, "
+                + "thesis_topic = ?, thesis_grade = ?, state_exam_grade = ?, statement_name = ?, student_number = ?, "
+                + "notes = ? WHERE id = ?"
+            : "INSERT INTO graduate (graduation_id, position, last_name, first_name, middle_name, birth_date, "
                 + "previous_document, previous_year, gek_date, gek_protocol, thesis_topic, thesis_grade, "
-                + "state_exam_grade, statement_name, student_number, notes) "
+                + "state_exam_grade, statement_name, student_number, notes, id) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )) {
             int column = 1;
-            insert.setString(column++, id);
             insert.setString(column++, graduation);
             insert.setInt(column++, graduate.position);
             insert.setString(column++, graduate.lastName);
@@ -467,7 +527,9 @@ public final class Graduations {
             integer(insert, column++, graduate.stateExamGrade);
             insert.setString(column++, graduate.statementName);
             insert.setString(column++, graduate.studentNumber);
-            insert.setString(column, graduate.notes.length() > 4000 ? graduate.notes.substring(0, 4000) : graduate.notes);
+            insert.setString(column++,
+                graduate.notes.length() > 4000 ? graduate.notes.substring(0, 4000) : graduate.notes);
+            insert.setString(column, id);
             insert.executeUpdate();
         }
         try (PreparedStatement insert = connection.prepareStatement(
@@ -525,7 +587,7 @@ public final class Graduations {
         }
     }
 
-    private static void audit(
+    static void audit(
         final Connection connection, final String id, final String action, final String details
     ) throws SQLException {
         try (PreparedStatement insert = connection.prepareStatement(

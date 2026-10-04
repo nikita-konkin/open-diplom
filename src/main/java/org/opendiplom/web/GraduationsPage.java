@@ -24,7 +24,11 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.opendiplom.catalog.Checks;
+import org.opendiplom.catalog.DocumentRecord;
 import org.opendiplom.catalog.GraduateRecord;
+import org.opendiplom.catalog.Honors;
+import org.opendiplom.catalog.Numbers;
+import org.opendiplom.catalog.Organization;
 import org.opendiplom.export.CatalogSource;
 import org.opendiplom.export.CyberDiplomaXml;
 import org.opendiplom.export.Program;
@@ -44,6 +48,7 @@ import org.opendiplom.sheets.WorkbookException;
 import org.opendiplom.sheets.Workbooks;
 import org.opendiplom.storage.Curricula;
 import org.opendiplom.storage.Database;
+import org.opendiplom.storage.Documents;
 import org.opendiplom.storage.Graduations;
 
 /**
@@ -56,7 +61,7 @@ final class GraduationsPage extends HttpServlet {
     private static final long serialVersionUID = 1L;
     private static final String TITLE = "Выпуски";
     private static final Pattern ROUTE = Pattern.compile(
-        "^/graduations(?:/(new)|/([0-9a-f-]{36})(?:/(match|xml|delete)|/graduates/([0-9a-f-]{36}))?)?/?$"
+        "^/graduations(?:/(new)|/([0-9a-f-]{36})(?:/(match|xml|delete|numbers)|/graduates/([0-9a-f-]{36})(/duplicate)?)?)?/?$"
     );
     private static final String STATEMENT = "statement.bin";
     private static final String INFO = "info.bin";
@@ -81,8 +86,10 @@ final class GraduationsPage extends HttpServlet {
                 this.fresh(request, response);
             } else if (route.group(2) == null) {
                 this.list(response);
-            } else if (route.group(4) != null) {
-                this.card(route.group(2), route.group(4), response);
+            } else if (route.group(4) != null && route.group(5) == null) {
+                this.card(route.group(2), route.group(4), request, response);
+            } else if (route.group(4) != null || "numbers".equals(route.group(3))) {
+                response.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
             } else if ("match".equals(route.group(3))) {
                 this.match(route.group(2), response, Collections.emptyList());
             } else if ("xml".equals(route.group(3))) {
@@ -102,8 +109,12 @@ final class GraduationsPage extends HttpServlet {
         throws IOException, ServletException {
         final Matcher route = ROUTE.matcher(path(request));
         try {
-            if (!route.matches() || route.group(4) != null) {
+            if (!route.matches()) {
                 response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            } else if (route.group(4) != null) {
+                this.document(route.group(2), route.group(4), route.group(5) != null, request, response);
+            } else if ("numbers".equals(route.group(3))) {
+                this.numbers(route.group(2), request, response);
             } else if ("new".equals(route.group(1))) {
                 this.upload(request, response);
             } else if ("match".equals(route.group(3))) {
@@ -379,7 +390,9 @@ final class GraduationsPage extends HttpServlet {
             .append(Html.escape(graduation.gekChairman)).append("\"> <button>Сохранить</button></form>");
         list(body, "Что мешает XML", registered.programProblems);
         body.append("</section><section><h2>Выпускники: ").append(registered.graduates.size()).append("</h2>")
-            .append(GraduationView.graduates(id, registered.graduates, registered.findings)).append("</section>");
+            .append(GraduationView.graduates(id, registered.graduates, registered.findings, registered.originals,
+                registered.honors, registered.printing)).append("</section>");
+        body.append(GraduationView.documents(id, registered.organization, registered.printing, request.getParameter("note")));
         body.append("<section><h2>XML для КиберДиплома</h2>");
         final long blocked = registered.findings.stream().filter(own -> !Checks.exportable(own)).count();
         final long unfinished = registered.findings.stream()
@@ -415,8 +428,9 @@ final class GraduationsPage extends HttpServlet {
         response.sendRedirect(request.getContextPath() + "/graduations/" + id);
     }
 
-    private void card(final String id, final String graduate, final HttpServletResponse response)
-        throws IOException, SQLException {
+    private void card(
+        final String id, final String graduate, final HttpServletRequest request, final HttpServletResponse response
+    ) throws IOException, SQLException {
         final Registered registered = this.registered(id, response);
         if (registered == null) {
             return;
@@ -424,15 +438,114 @@ final class GraduationsPage extends HttpServlet {
         for (int number = 0; number < registered.graduates.size(); ++number) {
             final GraduateRecord record = registered.graduates.get(number);
             if (record.id.equals(graduate)) {
+                final String note = request.getParameter("note");
                 final String body = "<h1>" + Html.escape(record.fullName()) + "</h1><p><a href=\"graduations/" + id
-                    + "\">Выпуск " + Html.escape(registered.graduation.groupName) + "</a></p><section><h2>Проверка</h2>"
+                    + "\">Выпуск " + Html.escape(registered.graduation.groupName) + "</a></p>"
+                    + (note == null ? "" : "<section class=\"note\">" + Html.escape(note) + "</section>")
+                    + "<section><h2>Проверка для XML</h2>"
                     + GraduationView.findings(registered.findings.get(number)) + "</section>"
+                    + GraduationView.document(id, record, registered.originals.get(number), registered.honors.get(number),
+                        registered.printing.get(number), registered.documents.getOrDefault(record.id, List.of()))
                     + GraduationView.card(record, registered.plan);
                 Responses.html(response, HttpServletResponse.SC_OK, Html.page(TITLE, body));
                 return;
             }
         }
         response.sendError(HttpServletResponse.SC_NOT_FOUND);
+    }
+
+    /**
+     * Gives registration numbers to the graduates without one and sets the
+     * date of issue; the numbers left over or wanting go back as a note.
+     */
+    private void numbers(final String id, final HttpServletRequest request, final HttpServletResponse response)
+        throws IOException, SQLException {
+        final Registered registered = this.registered(id, response);
+        if (registered == null) {
+            return;
+        }
+        final String date = field(request, "issue_date");
+        if (!date.isEmpty() && !DATE.matcher(date).matches()) {
+            this.problem(response, "Дата выдачи «" + date + "»: нужна дата ГГГГ-ММ-ДД");
+            return;
+        }
+        final Documents.Given given;
+        try {
+            given = new Documents(this.database).give(
+                id, registered.graduates, Numbers.parse(field(request, "numbers")), date
+            );
+        } catch (final IllegalArgumentException error) {
+            this.problem(response, error.getMessage());
+            return;
+        }
+        final List<String> note = new ArrayList<>();
+        if (given.numbered > 0) {
+            note.add("номера получили выпускников: " + given.numbered);
+        }
+        if (!given.left.isEmpty()) {
+            note.add("лишние номера не использованы: " + String.join(", ", given.left));
+        }
+        if (given.wanting > 0) {
+            note.add("номеров не хватило ещё выпускникам: " + given.wanting);
+        }
+        if (!date.isEmpty()) {
+            note.add("дата выдачи " + date + " у всех документов выпуска");
+        }
+        response.sendRedirect(request.getContextPath() + "/graduations/" + id
+            + (note.isEmpty() ? "" : "?note=" + URLEncoder.encode(String.join("; ", note), StandardCharsets.UTF_8)));
+    }
+
+    /** Saves the document of a graduate, or issues a duplicate of it. */
+    private void document(
+        final String id, final String graduate, final boolean duplicate, final HttpServletRequest request,
+        final HttpServletResponse response
+    ) throws IOException, SQLException {
+        final Registered registered = this.registered(id, response);
+        if (registered == null) {
+            return;
+        }
+        final int number = registered.position(graduate);
+        if (number < 0) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
+        final DocumentRecord original = registered.originals.get(number);
+        final String reg = field(request, "reg_number");
+        final String date = field(request, "issue_date");
+        if (!date.isEmpty() && !DATE.matcher(date).matches()) {
+            this.problem(response, "Дата выдачи «" + date + "»: нужна дата ГГГГ-ММ-ДД");
+            return;
+        }
+        final DocumentRecord document;
+        final String what;
+        if (duplicate) {
+            final String kind = field(request, "kind");
+            if (original.id == null || original.regNumber.isEmpty() || reg.isEmpty() || date.isEmpty()) {
+                this.problem(response, "Дубликат выдаётся взамен документа с регистрационным номером; "
+                    + "укажите новый регистрационный номер и дату выдачи дубликата");
+                return;
+            }
+            document = new DocumentRecord(
+                null, graduate, original.id, !"supplement".equals(kind), !"diploma".equals(kind), reg, date,
+                original.honors
+            );
+            what = document.duplicateTitle() + " № " + reg + " взамен № " + original.regNumber;
+        } else {
+            final String honors = field(request, "honors");
+            document = new DocumentRecord(
+                original.id, graduate, null, false, false, reg, date, honors.isEmpty() ? null : "1".equals(honors)
+            );
+            what = "№ " + (reg.isEmpty() ? "—" : reg) + ", дата выдачи " + (date.isEmpty() ? "—" : date)
+                + ", «с отличием»: " + (document.honors == null ? "по расчёту" : document.honors ? "да" : "нет");
+        }
+        try {
+            new Documents(this.database).save(id, document, what);
+        } catch (final IllegalArgumentException error) {
+            this.problem(response, error.getMessage());
+            return;
+        }
+        response.sendRedirect(request.getContextPath() + "/graduations/" + id + "/graduates/" + graduate + "?note="
+            + URLEncoder.encode("Сохранено: " + what, StandardCharsets.UTF_8));
     }
 
     private void xml(final String id, final HttpServletResponse response) throws IOException, SQLException {
@@ -528,8 +641,15 @@ final class GraduationsPage extends HttpServlet {
             return new Registered(graduation, null, null, null, Collections.emptyList());
         }
         final List<PlanRow> rows = curricula.rows(edition.id);
-        return new Registered(graduation, edition, PlanStructure.of(rows), PlanTotals.of(rows), graduations.graduates(id));
+        final Registered registered = new Registered(
+            graduation, edition, PlanStructure.of(rows), PlanTotals.of(rows), graduations.graduates(id)
+        );
+        final Documents documents = new Documents(this.database);
+        registered.document(documents.of(id), documents.organization());
+        return registered;
     }
+
+    private static final Pattern DATE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
 
     private static StudentInfo info(final byte[] content) throws WorkbookException, ValidationProblems {
         final List<Sheet> sheets = Workbooks.read(content, "Сведения о студентах");
@@ -633,6 +753,12 @@ final class GraduationsPage extends HttpServlet {
         final PlanStructure plan;
         final List<GraduateRecord> graduates;
         final List<List<Checks.Finding>> findings = new ArrayList<>();
+        /** The original document, the rule of «с отличием» and the findings for printing, by graduate. */
+        final List<DocumentRecord> originals = new ArrayList<>();
+        final List<Honors> honors = new ArrayList<>();
+        final List<List<Checks.Finding>> printing = new ArrayList<>();
+        Map<String, List<DocumentRecord>> documents = Collections.emptyMap();
+        Organization organization = Organization.empty();
         final Map<String, String> sources = new HashMap<>();
         final Map<String, String> fields;
         final List<String> programProblems = new ArrayList<>();
@@ -676,6 +802,31 @@ final class GraduationsPage extends HttpServlet {
             for (final GraduateRecord record : graduates) {
                 this.findings.add(Checks.of(record, plan, totals));
             }
+        }
+
+        /** Adds the documents and what printing them asks. */
+        void document(final Map<String, List<DocumentRecord>> all, final Organization issuer) {
+            this.documents = all;
+            this.organization = issuer;
+            final boolean exam = Checks.stateExam(this.plan);
+            for (int number = 0; number < this.graduates.size(); ++number) {
+                final GraduateRecord record = this.graduates.get(number);
+                final DocumentRecord original = Documents.original(all, record.id);
+                final Honors rule = Honors.of(record, exam);
+                this.originals.add(original);
+                this.honors.add(rule);
+                this.printing.add(Checks.printing(this.findings.get(number), record, original, rule, issuer));
+            }
+        }
+
+        /** The place of a graduate in the list, -1 when not there. */
+        int position(final String graduate) {
+            for (int number = 0; number < this.graduates.size(); ++number) {
+                if (this.graduates.get(number).id.equals(graduate)) {
+                    return number;
+                }
+            }
+            return -1;
         }
     }
 }

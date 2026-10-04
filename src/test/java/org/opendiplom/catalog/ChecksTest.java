@@ -138,4 +138,66 @@ final class ChecksTest {
             "A graduate who chose one discipline of an elective group was asked a grade for the other"
         );
     }
+
+    private static final Organization UNIVERSITY = new Organization(
+        "федеральное государственное бюджетное образовательное учреждение высшего образования", "г. Йошкар-Ола",
+        "Иванов", "Иван", "Иванович"
+    );
+
+    private static List<String> printing(final GraduateRecord graduate, final DocumentRecord document,
+        final Organization organization) {
+        final List<PlanRow> rows = Plans.bachelor();
+        final List<String> found = new ArrayList<>();
+        for (final Checks.Finding finding : Checks.printing(
+            Checks.of(graduate, PlanStructure.of(rows), PlanTotals.of(rows)), graduate, document,
+            Honors.of(graduate, true), organization
+        )) {
+            found.add(finding.toString());
+        }
+        return found;
+    }
+
+    @Test
+    void cannotPrintWithoutNumberDateOrOrganization() {
+        assertEquals(
+            "[ERROR не заполнены данные вуза: полное наименование, населённый пункт, фамилия и имя руководителя, "
+                + "ERROR нет регистрационного номера, ERROR нет даты выдачи]",
+            printing(graduate("2019", 5, MATHS, MATHS_WORK, PHYSICS, PRACTICE), DocumentRecord.blank("g"),
+                Organization.empty()).toString(),
+            "A diploma could be printed without its number, date of issue or the organization"
+        );
+    }
+
+    @Test
+    void cannotPrintPlaceholderGrade() {
+        final ResultRecord placeholder = new ResultRecord(3, ResultRecord.DISCIPLINE, "Физика", 7, "7", 4.0);
+        final List<String> found = printing(
+            graduate("2019", 5, MATHS, MATHS_WORK, placeholder, PRACTICE),
+            new DocumentRecord("d", "g", null, false, false, "10001", "2026-07-03", null), UNIVERSITY
+        );
+        assertTrue(
+            found.get(0).startsWith("ERROR «Физика»: код 7"),
+            "Code 7 «не выполнял», allowed in the XML, was let onto the printed diploma: " + found
+        );
+    }
+
+    @Test
+    void cannotIssueBeforeDecisionOfCommission() {
+        assertEquals(
+            "[ERROR дата выдачи 2026-06-01 раньше решения ГЭК 2026-06-24]",
+            printing(graduate("2019", 5, MATHS, MATHS_WORK, PHYSICS, PRACTICE),
+                new DocumentRecord("d", "g", null, false, false, "10001", "2026-06-01", null), UNIVERSITY).toString(),
+            "A diploma dated before the decision of the ГЭК was ready to print"
+        );
+    }
+
+    @Test
+    void cannotHideHonorsAgainstRule() {
+        final List<String> found = printing(graduate("2019", 5, MATHS, MATHS_WORK, PHYSICS, PRACTICE),
+            new DocumentRecord("d", "g", null, false, false, "10001", "2026-07-03", false), UNIVERSITY);
+        assertTrue(
+            found.size() == 1 && found.get(0).startsWith("WARNING снято «с отличием» вопреки расчёту по п. 27"),
+            "Honors taken off against the rule went without a word: " + found
+        );
+    }
 }

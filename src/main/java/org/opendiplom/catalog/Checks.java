@@ -18,6 +18,9 @@ import org.opendiplom.plans.PlanTotals;
  * placeholder until the real grade is known (D-01): the graduate is not
  * ready, but the XML may carry it. «1111» and names mixing alphabets are
  * warnings.
+ *
+ * <p>Printing asks more (ADR-0010): the registration number, the date of
+ * issue, the organization, and no placeholder left.
  */
 public final class Checks {
     private static final Pattern YEAR = Pattern.compile("\\d{4}");
@@ -85,6 +88,41 @@ public final class Checks {
     /** Findings of a level. */
     public static long count(final List<Finding> findings, final Level level) {
         return findings.stream().filter(finding -> finding.level == level).count();
+    }
+
+    /**
+     * What stands between a graduate and the printed diploma: the findings of
+     * {@link #of}, where code 7 now is an error (D-01), and those of its document.
+     */
+    public static List<Finding> printing(
+        final List<Finding> findings, final GraduateRecord graduate, final DocumentRecord document, final Honors rule,
+        final Organization organization
+    ) {
+        final List<Finding> printing = new ArrayList<>();
+        for (final Finding finding : findings) {
+            printing.add(finding.level == Level.UNFINISHED ? new Finding(Level.ERROR, finding.message) : finding);
+        }
+        if (!organization.missing().isEmpty()) {
+            printing.add(new Finding(Level.ERROR,
+                "не заполнены данные вуза: " + String.join(", ", organization.missing())));
+        }
+        if (document.regNumber.isEmpty()) {
+            printing.add(new Finding(Level.ERROR, "нет регистрационного номера"));
+        }
+        if (document.issueDate.isEmpty()) {
+            printing.add(new Finding(Level.ERROR, "нет даты выдачи"));
+        } else if (!graduate.gekDate.isEmpty() && document.issueDate.compareTo(graduate.gekDate) < 0) {
+            printing.add(new Finding(Level.ERROR,
+                "дата выдачи " + document.issueDate + " раньше решения ГЭК " + graduate.gekDate));
+        }
+        if (document.honors == null && rule.proposal == null) {
+            printing.add(new Finding(Level.UNFINISHED, "«с отличием» не рассчитано: " + rule.explanation));
+        } else if (document.honors != null && rule.proposal != null && !document.honors.equals(rule.proposal)) {
+            printing.add(new Finding(Level.WARNING, (document.honors ? "отмечено «с отличием»" : "снято «с отличием»")
+                + " вопреки расчёту по п. 27: " + rule.explanation));
+        }
+        printing.sort((left, right) -> left.level.compareTo(right.level));
+        return Collections.unmodifiableList(printing);
     }
 
     /** Whether the attestation of a plan has a state exam besides the thesis. */
