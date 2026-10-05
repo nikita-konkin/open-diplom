@@ -31,11 +31,23 @@ final class Responses {
     static void file(
         final HttpServletResponse response, final String type, final String name, final byte[] content
     ) throws IOException {
+        send(response, type, "attachment", name, content);
+    }
+
+    /** A PDF the browser opens to look at and print. */
+    static void pdf(final HttpServletResponse response, final String name, final byte[] content) throws IOException {
+        send(response, "application/pdf", "inline", name, content);
+    }
+
+    private static void send(
+        final HttpServletResponse response, final String type, final String disposition, final String name,
+        final byte[] content
+    ) throws IOException {
         response.setContentType(type);
         final String ascii = name.replaceAll("[^\\x20-\\x7e]", "_").replace("\"", "_");
         response.setHeader(
             "Content-Disposition",
-            "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''"
+            disposition + "; filename=\"" + ascii + "\"; filename*=UTF-8''"
                 + URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20")
         );
         response.setContentLength(content.length);

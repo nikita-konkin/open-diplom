@@ -56,6 +56,49 @@ public final class Program {
         return this.directionCode;
     }
 
+    /** As supplements print it: «Информационные системы и технологии». */
+    public String directionName() {
+        return this.directionName;
+    }
+
+    public String profile() {
+        return this.profile;
+    }
+
+    public String qualification() {
+        return Cells.text(this.qualification);
+    }
+
+    public String studyForm() {
+        return Cells.text(this.studyForm);
+    }
+
+    public String studyTerm() {
+        return Cells.text(this.studyTerm);
+    }
+
+    /** Credits of the program, as text. */
+    public String programCredits() {
+        return Cells.text(this.programCredits);
+    }
+
+    /** «3180 ак.час». */
+    public String contactHours() {
+        return Cells.text(this.contactHours);
+    }
+
+    public String practiceCredits() {
+        return Cells.text(this.practiceCredits);
+    }
+
+    public String finalCredits() {
+        return Cells.text(this.finalCredits);
+    }
+
+    public String gekChairman() {
+        return Cells.text(this.gekChairman);
+    }
+
     /** Settings of a program, checked by {@link #build()}. */
     public static final class Builder {
         private String direction;

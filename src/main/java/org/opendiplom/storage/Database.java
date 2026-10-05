@@ -20,7 +20,8 @@ import java.util.List;
 public final class Database {
     /** Migrations in the order they are applied; never edit an applied one. */
     private static final List<String> MIGRATIONS = Arrays.asList(
-        "V1__import.sql", "V2__curricula.sql", "V3__graduations.sql", "V4__documents.sql"
+        "V1__import.sql", "V2__curricula.sql", "V3__graduations.sql", "V4__documents.sql",
+        "V5__blanks.sql"
     );
 
     private final String url;

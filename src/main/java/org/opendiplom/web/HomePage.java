@@ -56,11 +56,9 @@ final class HomePage extends HttpServlet {
             .append("<label>Учебный план (необязательно): Excel или PDF, сохранённый из «Планов»</label>")
             .append("<input type=\"file\" name=\"curriculum\" accept=\".xls,.xlsx,.pdf\">")
             .append("<br><button>Прочитать</button></form></section>");
-        body.append("<section><h2>Калибровка принтера</h2>")
-            .append("<form method=\"get\" action=\"test-sheet.pdf\">")
-            .append("<label>Поправка вправо, мм</label><input type=\"number\" step=\"0.1\" name=\"dx\" value=\"0\">")
-            .append("<label>Поправка вниз, мм</label><input type=\"number\" step=\"0.1\" name=\"dy\" value=\"0\">")
-            .append("<br><button>Тестовый лист (PDF)</button></form></section>");
+        body.append("<section><h2><a href=\"blanks\">Бланки и принтер</a></h2>")
+            .append("<p>Шаблоны FastReport диплома и приложения от типографии, образец печати и поправка принтера ")
+            .append("по тестовому листу.</p></section>");
         body.append(XmlPage.form());
         body.append("<section><h2>Последние импорты</h2>");
         try {

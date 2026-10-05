@@ -63,6 +63,8 @@ public final class WebServer {
             new GraduationsPage(database, settings.dataFolder().resolve("staging").resolve("graduations")), uploads
         );
         this.add(context, "/organization", new OrganizationPage(database), null);
+        this.add(context, "/blanks/*", new BlanksPage(database, settings), uploads);
+        this.add(context, "/print/*", new PrintPage(database, settings), null);
         this.add(context, "/xml", new XmlPage(), uploads);
         this.add(context, "/xml/plan", new XmlPlanPage(), uploads);
         this.add(context, "/test-sheet.pdf", new TestSheetPage(settings), null);

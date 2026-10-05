@@ -189,8 +189,8 @@ final class GraduationView {
             html.append("<p class=\"error\">Не заполнены <a href=\"organization\">данные вуза</a>: ")
                 .append(Html.escape(String.join(", ", organization.missing()))).append(".</p>");
         }
-        html.append("<p>Готовы к печати: ").append(ready).append(" из ").append(printing.size())
-            .append(". Печать на бланке появится на следующем этапе.</p>")
+        html.append("<p>Готовы к печати: ").append(ready).append(" из ").append(printing.size()).append(".</p>")
+            .append(print(graduation, null, null, ready == printing.size()))
             .append("<form method=\"post\" action=\"graduations/").append(graduation).append("/numbers\">")
             .append("<label>Регистрационные номера — подряд или с пропусками: «10001–10007, 10010». ")
             .append("Получат выпускники без номера, по порядку списка</label>")
@@ -221,7 +221,8 @@ final class GraduationView {
             .append(option("1", "с отличием — решение оператора", current))
             .append(option("0", "без отличия — решение оператора", current))
             .append("</select><br><button>Сохранить</button></form>")
-            .append("<h3>Проверка для печати</h3>").append(findings(printing));
+            .append("<h3>Проверка для печати</h3>").append(findings(printing))
+            .append(print(graduation, graduate.id, null, Checks.ready(printing)));
         final List<DocumentRecord> duplicates = new ArrayList<>();
         for (final DocumentRecord document : all) {
             if (document.duplicate()) {
@@ -232,11 +233,21 @@ final class GraduationView {
         if (duplicates.isEmpty()) {
             html.append("<p class=\"muted\">Не выдавались.</p>");
         } else {
-            html.append("<table><tr><th>Что</th><th>Рег. номер</th><th>Дата выдачи</th></tr>");
+            html.append("<table><tr><th>Что</th><th>Рег. номер</th><th>Дата выдачи</th><th>Печать</th></tr>");
             for (final DocumentRecord duplicate : duplicates) {
                 html.append("<tr><td>").append(Html.escape(duplicate.duplicateTitle())).append("</td><td>")
                     .append(Html.escape(duplicate.regNumber)).append("</td><td>").append(Html.escape(duplicate.issueDate))
-                    .append("</td></tr>");
+                    .append("</td><td>");
+                if (duplicate.diplomaDuplicate) {
+                    html.append("<a href=\"").append(PrintPage.link(graduation, "diploma", graduate.id, duplicate.id, false))
+                        .append("\">диплом</a> ");
+                }
+                if (duplicate.supplementDuplicate) {
+                    html.append("<a href=\"")
+                        .append(PrintPage.link(graduation, "supplement", graduate.id, duplicate.id, false))
+                        .append("\">приложение</a>");
+                }
+                html.append("</td></tr>");
             }
             html.append("</table>");
         }
@@ -251,6 +262,26 @@ final class GraduationView {
                 .append("<br><button>Выдать дубликат</button></form>");
         }
         return html.append("</section>").toString();
+    }
+
+    /**
+     * Links to the PDF of the diploma and the supplement and to their
+     * samples: of a graduate, or of all when {@code graduate} is {@code null}.
+     */
+    static String print(final String graduation, final String graduate, final String document, final boolean ready) {
+        final StringBuilder html = new StringBuilder("<p>Печать на бланке");
+        html.append(graduate == null ? " всего выпуска" : "").append(": ");
+        for (final String[] kind : new String[][] {{"supplement", "приложение"}, {"diploma", "диплом"}}) {
+            if (ready) {
+                html.append("<a href=\"").append(PrintPage.link(graduation, kind[0], graduate, document, false))
+                    .append("\">").append(kind[1]).append(" (PDF)</a>");
+            } else {
+                html.append("<span class=\"muted\">").append(kind[1]).append(" — документы не готовы</span>");
+            }
+            html.append(" · <a href=\"").append(PrintPage.link(graduation, kind[0], graduate, document, true))
+                .append("\">образец</a>; ");
+        }
+        return html.append("<a href=\"blanks\">шаблоны и принтер</a>.</p>").toString();
     }
 
     /** Findings as a list, errors first. */

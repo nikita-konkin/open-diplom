@@ -3,6 +3,7 @@ package org.opendiplom.web;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.opendiplom.Books.row;
 import static org.opendiplom.Books.student;
 
@@ -22,6 +23,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,9 +33,11 @@ import org.junit.jupiter.api.io.TempDir;
 import org.opendiplom.Books;
 import org.opendiplom.Plans;
 import org.opendiplom.Settings;
+import org.opendiplom.Templates;
 import org.opendiplom.export.StudentInfo;
 import org.opendiplom.graduation.StudentMatch;
 import org.opendiplom.plans.PlanHeader;
+import org.opendiplom.printing.Fonts;
 import org.opendiplom.storage.Curricula;
 import org.opendiplom.storage.Database;
 
@@ -228,6 +234,52 @@ final class GraduationsPageTest {
     }
 
     @Test
+    void cannotPrintOnBlankBeforeDocumentIsReady() throws Exception {
+        assumeTrue(Fonts.serif("").isPresent(), "No Cyrillic serif font on this machine");
+        final String graduation = this.confirm(this.upload(
+            Books.statement(studied("Андреев А. А."), studied("Борисов Б. Б.")), info(true)
+        ));
+        this.post(graduation, Map.of("chairman", "Председатель П. П."));
+        final String print = graduation.replace("graduations/", "print/") + "/supplement.pdf";
+        final HttpResponse<String> untemplated = this.get(print + "?sample=1");
+        assertTrue(untemplated.statusCode() == 400 && untemplated.body().contains("Нет шаблона «Приложение к диплому»"),
+            "A supplement printed without its template: " + untemplated.body());
+        assertEquals(302, this.template("supplement", "03", Templates.gzip(Templates.supplement())).statusCode(),
+            "The template was not taken");
+        assertTrue(this.get("blanks").body().contains("2 страницы; замечаний нет"),
+            "The template uploaded is not on the page of blanks, or has problems");
+        final HttpResponse<String> unready = this.get(print);
+        assertTrue(unready.statusCode() == 400 && unready.body().contains("нет регистрационного номера"),
+            "A supplement without its number printed for the blank: " + unready.body());
+        final HttpResponse<byte[]> sample = this.bytes(print + "?sample=1");
+        assertTrue(
+            sample.statusCode() == 200 && sample.headers().firstValue("Content-Type").orElse("").startsWith("application/pdf"),
+            "The sample of an unfinished supplement was refused"
+        );
+        this.post("organization", Map.of(
+            "full_name", "университет", "locality", "г. Йошкар-Ола", "head_last_name", "Петров",
+            "head_first_name", "Пётр", "head_middle_name", "Петрович"
+        ));
+        this.post(graduation + "/numbers", Map.of("numbers", "10001-10002", "issue_date", "2026-07-03"));
+        final HttpResponse<byte[]> pdf = this.bytes(print);
+        assertEquals(200, pdf.statusCode(), "The supplements of a graduation ready to print were refused: "
+            + new String(pdf.body(), StandardCharsets.UTF_8));
+        try (PDDocument document = Loader.loadPDF(pdf.body())) {
+            final String text = new PDFTextStripper().getText(document);
+            assertTrue(
+                document.getNumberOfPages() == 4 && text.contains("Андреев") && text.contains("10002")
+                    && text.contains("Производственная практика (преддипломная практика)")
+                    && text.contains("Математика (курсовая работа)") && !text.contains("ОБРАЗЕЦ"),
+                "The supplements of the two graduates are not two sides each with their data, course works in the table "
+                    + "of a template without a band for them: " + text
+            );
+        }
+        final HttpResponse<String> diploma = this.get(graduation.replace("graduations/", "print/") + "/diploma.pdf");
+        assertTrue(diploma.statusCode() == 400 && diploma.body().contains("Нет шаблона «Диплом»"),
+            "A diploma printed from the template of the supplement");
+    }
+
+    @Test
     void cannotExportGraduateWithoutStateExam() throws Exception {
         final String graduation = this.confirm(this.upload(
             Books.statement(studied("Андреев А. А."), studied("Борисов Б. Б.")), info(false)
@@ -328,6 +380,29 @@ final class GraduationsPageTest {
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(String.join("&", pairs))).build(),
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+        );
+    }
+
+    /** Uploads a template of the blanks. */
+    private HttpResponse<String> template(final String kind, final String level, final byte[] content) throws Exception {
+        final ByteArrayOutputStream body = new ByteArrayOutputStream();
+        for (final String[] field : new String[][] {{"kind", kind}, {"level", level}}) {
+            body.write(("--" + BOUNDARY + "\r\nContent-Disposition: form-data; name=\"" + field[0] + "\"\r\n\r\n" + field[1]
+                + "\r\n").getBytes(StandardCharsets.UTF_8));
+        }
+        part(body, "template", "Приложение к диплому бакалавра.fr3", content);
+        body.write(("--" + BOUNDARY + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        return this.client.send(
+            HttpRequest.newBuilder(URI.create(this.address + "blanks/upload"))
+                .header("Content-Type", "multipart/form-data; boundary=" + BOUNDARY)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray())).build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+        );
+    }
+
+    private HttpResponse<byte[]> bytes(final String path) throws Exception {
+        return this.client.send(
+            HttpRequest.newBuilder(URI.create(this.address + path)).build(), HttpResponse.BodyHandlers.ofByteArray()
         );
     }
 

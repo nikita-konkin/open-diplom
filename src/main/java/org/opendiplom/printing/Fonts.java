@@ -27,6 +27,13 @@ public final class Fonts {
         "/System/Library/Fonts/Supplemental"
     );
     private static final int DEPTH = 4;
+    /** The bold face of each regular one. */
+    private static final List<String[]> BOLD = Arrays.asList(
+        new String[] {"PTAstraSerif-Regular.ttf", "PTAstraSerif-Bold.ttf"},
+        new String[] {"times.ttf", "timesbd.ttf"},
+        new String[] {"Times New Roman.ttf", "Times New Roman Bold.ttf"},
+        new String[] {"LiberationSerif-Regular.ttf", "LiberationSerif-Bold.ttf"}
+    );
 
     private Fonts() {
     }
@@ -50,6 +57,25 @@ public final class Fonts {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * The bold face next to a regular font: the known pairs, else «Regular» in
+     * the file name replaced with «Bold».
+     */
+    public static Optional<Path> bold(final Path regular) {
+        final String name = regular.getFileName().toString();
+        String bold = name.replace("Regular", "Bold");
+        for (final String[] pair : BOLD) {
+            if (pair[0].equalsIgnoreCase(name)) {
+                bold = pair[1];
+            }
+        }
+        final Path parent = regular.toAbsolutePath().getParent();
+        if (bold.equals(name) || parent == null) {
+            return Optional.empty();
+        }
+        return find(parent, bold);
     }
 
     private static Optional<Path> find(final Path folder, final String file) {
