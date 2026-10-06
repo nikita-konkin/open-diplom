@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.opendiplom.Books.row;
 import static org.opendiplom.Books.student;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -26,6 +27,7 @@ import java.util.regex.Pattern;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -277,6 +279,68 @@ final class GraduationsPageTest {
         final HttpResponse<String> diploma = this.get(graduation.replace("graduations/", "print/") + "/diploma.pdf");
         assertTrue(diploma.statusCode() == 400 && diploma.body().contains("Нет шаблона «Диплом»"),
             "A diploma printed from the template of the supplement");
+    }
+
+    @Test
+    void cannotPrintDocumentTwiceOnBlanks() throws Exception {
+        assumeTrue(Fonts.serif("").isPresent(), "No Cyrillic serif font on this machine");
+        final String graduation = this.confirm(this.upload(
+            Books.statement(studied("Андреев А. А."), studied("Борисов Б. Б.")), info(true)
+        ));
+        this.post(graduation, Map.of("chairman", "Председатель П. П."));
+        this.post("organization", Map.of(
+            "full_name", "университет", "locality", "г. Йошкар-Ола", "head_last_name", "Петров",
+            "head_first_name", "Пётр", "head_middle_name", "Петрович"
+        ));
+        this.post(graduation + "/numbers", Map.of("numbers", "10001-10002", "issue_date", "2026-07-03"));
+        this.template("supplement", "03", Templates.gzip(Templates.supplement()));
+        assertEquals(302, this.post("stock", Map.of("action", "receive", "form", "supplement-03", "series", "123456",
+            "numbers", "0000101-0000110", "received", "2026-06-01", "note", "накладная 7")).statusCode(),
+            "The blanks did not come in");
+        final String print = graduation.replace("graduations/", "print/") + "/supplement.pdf";
+        assertEquals(200, this.bytes(print).statusCode(), "The supplements ready to print were refused");
+        assertTrue(this.get(graduation).body().contains("name=\"first.supplement-03\" value=\"0000101\""),
+            "The page does not offer the first free blank for the printed run");
+        assertEquals(302, this.post(graduation + "/blanks",
+            Map.of("series.supplement-03", "123456", "first.supplement-03", "0000101")).statusCode(),
+            "The blanks of the run were not written");
+        final HttpResponse<String> again = this.get(print);
+        assertTrue(again.statusCode() == 400 && again.body().contains("уже записаны на бланки"),
+            "The documents on blanks printed again: " + again.body());
+        final Matcher card = Pattern.compile("graduations/[0-9a-f-]{36}/graduates/[0-9a-f-]{36}")
+            .matcher(this.get(graduation).body());
+        assertTrue(card.find(), "No card of a graduate on the page");
+        final Matcher spoil = Pattern.compile("value=\"spoil\"><input type=\"hidden\" name=\"document\" "
+            + "value=\"([0-9a-f-]{36})\"><input type=\"hidden\" name=\"kind\" value=\"supplement\">")
+            .matcher(this.get(card.group()).body());
+        assertTrue(spoil.find(), "The card offers no way to spoil the blank of the supplement");
+        assertEquals(302, this.post(card.group() + "/blanks", Map.of("action", "spoil", "document", spoil.group(1),
+            "kind", "supplement", "reason", "замят в принтере")).statusCode(), "The blank was not spoiled");
+        try (PDDocument document = Loader.loadPDF(this.bytes(print).body())) {
+            final String text = new PDFTextStripper().getText(document);
+            assertTrue(
+                document.getNumberOfPages() == 2 && text.contains("Андреев") && !text.contains("Борисов"),
+                "The print of the graduation did not take only the document whose blank was spoiled: " + text
+            );
+        }
+        this.post(graduation + "/blanks", Map.of("series.supplement-03", "123456", "first.supplement-03", "0000101"));
+        final String book = this.get("book?from=2026-01-01&to=2026-12-31").body();
+        assertTrue(
+            book.contains("<td>10001</td><td>Андреев Андрей Андреевич</td><td></td><td>123456 0000103</td>"
+                + "<td>03.07.2026</td>") && book.contains("<td>10002</td><td>Борисов Борис Борисович</td><td></td>"
+                + "<td>123456 0000102</td>"),
+            "The book of registration has not the blanks the documents are on: " + book
+        );
+        try (XSSFWorkbook xlsx = new XSSFWorkbook(new ByteArrayInputStream(
+            this.bytes("book?from=2026-01-01&to=2026-12-31&format=xlsx").body()
+        ))) {
+            assertEquals("10001 123456 0000103", xlsx.getSheetAt(0).getRow(2).getCell(0).getStringCellValue() + " "
+                + xlsx.getSheetAt(0).getRow(2).getCell(3).getStringCellValue(), "The book to print lost its rows");
+        }
+        assertTrue(
+            this.get("stock").body().contains("<td>Приложение к диплому бакалавра</td><td>7</td><td>2</td><td>1</td>"),
+            "The stock does not count the blanks as they went"
+        );
     }
 
     @Test

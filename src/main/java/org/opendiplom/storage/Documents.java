@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import org.opendiplom.catalog.DocumentRecord;
 import org.opendiplom.catalog.GraduateRecord;
@@ -143,6 +144,21 @@ public final class Documents {
             if (!taken.isEmpty()) {
                 throw new IllegalArgumentException("Номера уже есть в картотеке: " + String.join(", ", taken));
             }
+            if (!issueDate.isEmpty()) {
+                final List<String> printed = new ArrayList<>();
+                for (final GraduateRecord graduate : graduates) {
+                    final DocumentRecord original = original(documents, graduate.id);
+                    if (original.id != null && !issueDate.equals(original.issueDate)
+                        && (Stock.issued(connection, original.id) || !Stock.used(connection, original.id).isEmpty())) {
+                        printed.add(graduate.fullName());
+                    }
+                }
+                if (!printed.isEmpty()) {
+                    throw new IllegalArgumentException("Дата выдачи уже напечатана на бланках у выпускников: "
+                        + String.join(", ", printed) + ". Задайте дату другим в их карточках или отметьте бланки "
+                        + "испорченными");
+                }
+            }
             int next = 0;
             int wanting = 0;
             final List<String> given = new ArrayList<>();
@@ -175,11 +191,15 @@ public final class Documents {
     /**
      * Saves a document of a graduate of the graduation.
      *
-     * @throws IllegalArgumentException when its number belongs to another document
+     * @throws IllegalArgumentException when its number belongs to another document, or it is handed, or the
+     *     change is of what is printed on its blanks (ADR-0013)
      */
     public void save(final String graduationId, final DocumentRecord document, final String what) throws SQLException {
         try (Connection connection = this.database.connection()) {
             connection.setAutoCommit(false);
+            if (document.id != null) {
+                printed(connection, document);
+            }
             if (!document.regNumber.isEmpty()) {
                 final List<String> taken = taken(connection, List.of(document.regNumber), document.id);
                 if (!taken.isEmpty()) {
@@ -192,7 +212,10 @@ public final class Documents {
         }
     }
 
-    /** Deletes the documents of a graduate leaving the registry; the numbers they had. */
+    /**
+     * Deletes the documents of a graduate leaving the registry; the numbers
+     * they had. A blank spoiled with one stays spoiled, without the document.
+     */
     static List<String> forget(final Connection connection, final String graduateId) throws SQLException {
         final List<String> numbers = new ArrayList<>();
         try (PreparedStatement query = connection.prepareStatement(
@@ -205,9 +228,58 @@ public final class Documents {
                 }
             }
         }
+        try (PreparedStatement update = connection.prepareStatement(
+            "UPDATE blank SET document_id = NULL WHERE status = ? AND document_id IN "
+                + "(SELECT id FROM document WHERE graduate_id = ?)"
+        )) {
+            update.setString(1, Stock.SPOILED);
+            update.setString(2, graduateId);
+            update.executeUpdate();
+        }
+        delete(connection, "DELETE FROM document_issue WHERE document_id IN (SELECT id FROM document WHERE graduate_id = ?)",
+            graduateId);
         delete(connection, "DELETE FROM document WHERE graduate_id = ? AND duplicate_of IS NOT NULL", graduateId);
         delete(connection, "DELETE FROM document WHERE graduate_id = ?", graduateId);
         return numbers;
+    }
+
+    /**
+     * Refuses a change of a handed document, and of a printed one when the
+     * change is of what its blanks have: the number and the date are on both,
+     * «с отличием» on the diploma.
+     */
+    private static void printed(final Connection connection, final DocumentRecord document) throws SQLException {
+        DocumentRecord stored = null;
+        try (PreparedStatement query = connection.prepareStatement("SELECT * FROM document WHERE id = ?")) {
+            query.setString(1, document.id);
+            try (ResultSet row = query.executeQuery()) {
+                if (row.next()) {
+                    stored = record(row);
+                }
+            }
+        }
+        if (stored == null) {
+            return;
+        }
+        final boolean dated = !stored.regNumber.equals(document.regNumber) || !stored.issueDate.equals(document.issueDate);
+        final boolean honored = !Objects.equals(stored.honors, document.honors);
+        if (!dated && !honored) {
+            return;
+        }
+        if (Stock.issued(connection, document.id)) {
+            throw new IllegalArgumentException("Документ № " + stored.regNumber + " выдан и не изменяется; при ошибке "
+                + "в нём выдаётся дубликат");
+        }
+        final List<Stock.Blank> printed = new ArrayList<>();
+        for (final Stock.Blank blank : Stock.used(connection, document.id)) {
+            if (dated || Blanks.DIPLOMA.equals(blank.form.kind)) {
+                printed.add(blank);
+            }
+        }
+        if (!printed.isEmpty()) {
+            throw new IllegalArgumentException("Документ № " + stored.regNumber + " напечатан: " + Stock.labels(printed)
+                + ". Изменение разойдётся с напечатанным: сначала отметьте бланк испорченным");
+        }
     }
 
     /** Of the numbers, those another document has. */

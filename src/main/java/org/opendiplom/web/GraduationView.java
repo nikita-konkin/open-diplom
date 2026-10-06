@@ -139,14 +139,16 @@ final class GraduationView {
             + (item.row().credits() == null ? "" : " (" + PlanTotals.number(item.row().credits()) + " з.е.)");
     }
 
-    /** Graduates with how far each is from the XML and from the printed diploma. */
+    /** Graduates with how far each is from the XML, from the printed diploma and from its handing. */
     static String graduates(
         final String graduation, final List<GraduateRecord> graduates, final List<List<Checks.Finding>> findings,
-        final List<DocumentRecord> originals, final List<Honors> honors, final List<List<Checks.Finding>> printing
+        final List<DocumentRecord> originals, final List<Honors> honors, final List<List<Checks.Finding>> printing,
+        final List<String> blanks
     ) {
         final StringBuilder html = new StringBuilder("<div class=\"scroll\"><table><tr><th>№</th><th>ФИО</th>")
             .append("<th>Номер студента</th><th>Результатов</th><th>Ошибок</th><th>Не завершено</th>")
-            .append("<th>Предупреждений</th><th>Итог</th><th>Рег. номер</th><th>С отличием</th><th>К печати</th></tr>");
+            .append("<th>Предупреждений</th><th>Итог</th><th>Рег. номер</th><th>С отличием</th><th>К печати</th>")
+            .append("<th>Бланки</th></tr>");
         for (int number = 0; number < graduates.size(); ++number) {
             final GraduateRecord graduate = graduates.get(number);
             final List<Checks.Finding> own = findings.get(number);
@@ -165,7 +167,7 @@ final class GraduationView {
                 .append("</td><td>").append(Html.escape(honors(document, honors.get(number))))
                 .append("</td><td").append(Checks.ready(print) ? ">готов" : " class=\"note\">замечаний: "
                     + (Checks.count(print, Checks.Level.ERROR) + Checks.count(print, Checks.Level.UNFINISHED)))
-                .append("</td></tr>");
+                .append("</td><td>").append(Html.escape(blanks.get(number))).append("</td></tr>");
         }
         return html.append("</table></div>").toString();
     }
@@ -178,10 +180,14 @@ final class GraduationView {
         return rule.proposal == null ? "?" : rule.proposal ? "да" : "нет";
     }
 
-    /** The numbers and the date of issue of a graduation, and what keeps its documents from printing. */
+    /**
+     * The numbers and the date of issue of a graduation, and what keeps its
+     * documents from printing; diplomas «с отличием» and without go on blanks
+     * of two forms, so a graduation with both prints them apart.
+     */
     static String documents(
         final String graduation, final Organization organization, final List<List<Checks.Finding>> printing,
-        final String note
+        final String note, final boolean mixed
     ) {
         final long ready = printing.stream().filter(Checks::ready).count();
         final StringBuilder html = new StringBuilder("<section><h2>Документы</h2>");
@@ -193,7 +199,7 @@ final class GraduationView {
                 .append(Html.escape(String.join(", ", organization.missing()))).append(".</p>");
         }
         html.append("<p>Готовы к печати: ").append(ready).append(" из ").append(printing.size()).append(".</p>")
-            .append(print(graduation, null, null, ready == printing.size()))
+            .append(print(graduation, null, null, ready == printing.size(), mixed))
             .append("<form method=\"post\" action=\"graduations/").append(graduation).append("/numbers\">")
             .append("<label>Регистрационные номера — подряд или с пропусками: «10001–10007, 10010». ")
             .append("Получат выпускники без номера, по порядку списка</label>")
@@ -272,16 +278,27 @@ final class GraduationView {
      * samples: of a graduate, or of all when {@code graduate} is {@code null}.
      */
     static String print(final String graduation, final String graduate, final String document, final boolean ready) {
+        return print(graduation, graduate, document, ready, false);
+    }
+
+    /** The links of {@link #print}; the diplomas of two forms apart when {@code mixed}. */
+    private static String print(
+        final String graduation, final String graduate, final String document, final boolean ready, final boolean mixed
+    ) {
         final StringBuilder html = new StringBuilder("<p>Печать на бланке");
-        html.append(graduate == null ? " всего выпуска" : "").append(": ");
-        for (final String[] kind : new String[][] {{"supplement", "приложение"}, {"diploma", "диплом"}}) {
+        html.append(graduate == null ? " всего выпуска — документы, ещё не записанные на бланки" : "").append(": ");
+        final String[][] kinds = mixed
+            ? new String[][] {{"supplement", "приложение", null}, {"diploma", "диплом без отличия", "0"},
+                {"diploma", "диплом с отличием", "1"}}
+            : new String[][] {{"supplement", "приложение", null}, {"diploma", "диплом", null}};
+        for (final String[] kind : kinds) {
             if (ready) {
-                html.append("<a href=\"").append(PrintPage.link(graduation, kind[0], graduate, document, false))
+                html.append("<a href=\"").append(PrintPage.link(graduation, kind[0], graduate, document, false, kind[2]))
                     .append("\">").append(kind[1]).append(" (PDF)</a>");
             } else {
                 html.append("<span class=\"muted\">").append(kind[1]).append(" — документы не готовы</span>");
             }
-            html.append(" · <a href=\"").append(PrintPage.link(graduation, kind[0], graduate, document, true))
+            html.append(" · <a href=\"").append(PrintPage.link(graduation, kind[0], graduate, document, true, kind[2]))
                 .append("\">образец</a>; ");
         }
         return html.append("<a href=\"blanks\">шаблоны и принтер</a>.</p>").toString();

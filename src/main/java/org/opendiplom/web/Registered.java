@@ -19,10 +19,12 @@ import org.opendiplom.plans.PlanHeader;
 import org.opendiplom.plans.PlanRow;
 import org.opendiplom.plans.PlanStructure;
 import org.opendiplom.plans.PlanTotals;
+import org.opendiplom.storage.Blanks;
 import org.opendiplom.storage.Curricula;
 import org.opendiplom.storage.Database;
 import org.opendiplom.storage.Documents;
 import org.opendiplom.storage.Graduations;
+import org.opendiplom.storage.Stock;
 
 /**
  * What the pages of a registered graduation show: the program, the checks and
@@ -44,6 +46,9 @@ final class Registered {
     final List<List<Checks.Finding>> printing = new ArrayList<>();
     Map<String, List<DocumentRecord>> documents = Collections.emptyMap();
     Organization organization = Organization.empty();
+    /** The blanks of the documents and how they were handed, by document (ADR-0013). */
+    Map<String, List<Stock.Blank>> blanks = Collections.emptyMap();
+    Map<String, Stock.Issue> issues = Collections.emptyMap();
     final Map<String, String> sources = new HashMap<>();
     final Map<String, String> fields;
     final List<String> programProblems = new ArrayList<>();
@@ -111,6 +116,9 @@ final class Registered {
         );
         final Documents documents = new Documents(database);
         registered.document(documents.of(id), documents.organization());
+        final Stock stock = new Stock(database);
+        registered.blanks = stock.of(id);
+        registered.issues = stock.issues(id);
         return registered;
     }
 
@@ -127,6 +135,21 @@ final class Registered {
             this.honors.add(rule);
             this.printing.add(Checks.printing(this.findings.get(number), record, original, rule, issuer));
         }
+    }
+
+    /** The blank of a kind a document is printed on, {@code null} when none. */
+    Stock.Blank used(final String documentId, final String kind) {
+        for (final Stock.Blank blank : this.blanks.getOrDefault(documentId, List.of())) {
+            if (Stock.USED.equals(blank.status) && blank.form.kind.equals(kind)) {
+                return blank;
+            }
+        }
+        return null;
+    }
+
+    /** The form of blank a kind of a document of the graduate in this place is printed on. */
+    Stock.Form form(final int number, final DocumentRecord document, final String kind) {
+        return new Stock.Form(kind, Blanks.level(this.edition.header.code()), document.honors(this.honors.get(number)));
     }
 
     /** The place of a graduate in the list, -1 when not there. */

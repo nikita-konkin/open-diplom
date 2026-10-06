@@ -59,6 +59,9 @@ final class HomePage extends HttpServlet {
         body.append("<section><h2><a href=\"blanks\">Бланки и принтер</a></h2>")
             .append("<p>Шаблоны FastReport диплома и приложения от типографии, образец печати и поправка принтера ")
             .append("по тестовому листу.</p></section>");
+        body.append("<section><h2><a href=\"stock\">Бланки строгой отчётности</a></h2>")
+            .append("<p>Приход бланков от типографии, запись бланков, на которых напечатаны документы, испорченные ")
+            .append("бланки и реестр. <a href=\"book\">Книга регистрации</a> выданных документов.</p></section>");
         body.append(XmlPage.form());
         body.append("<section><h2>Последние импорты</h2>");
         try {

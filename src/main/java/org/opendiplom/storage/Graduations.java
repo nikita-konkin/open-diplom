@@ -42,7 +42,8 @@ public final class Graduations {
         "staged", "файлы загружены", "registered", "записан в картотеку",
         "replaced", "выпускники заменены повторным импортом", "chairman", "председатель ГЭК",
         Documents.NUMBERS, "регистрационные номера и дата выдачи", Documents.DOCUMENT, "документ выпускника",
-        Documents.DUPLICATE, "дубликат", "edit", "правка в карточке выпускника"
+        Documents.DUPLICATE, "дубликат", "edit", "правка в карточке выпускника",
+        Stock.BLANKS, "бланки строгой отчётности", Stock.ISSUE, "выдача документов"
     );
 
     private final Database database;
@@ -260,7 +261,11 @@ public final class Graduations {
      * documents and the corrections; those of one no longer there go with the
      * graduate.
      *
+     * <p>A graduation with documents on blanks is not replaced: the files
+     * would change what is printed or handed (ADR-0013).
+     *
      * @return the identifier of the registered graduation
+     * @throws IllegalStateException when the graduation has documents on blanks
      */
     public String register(
         final String id, final List<GraduateRecord> graduates, final String programId,
@@ -273,6 +278,12 @@ public final class Graduations {
         try (Connection connection = this.database.connection()) {
             connection.setAutoCommit(false);
             final String earlier = earlier(connection, staged);
+            final int printed = earlier == null ? 0 : Stock.printed(connection, earlier);
+            if (printed > 0) {
+                throw new IllegalStateException("Документы выпуска уже на бланках строгой отчётности (бланков: " + printed
+                    + "): новые файлы заменили бы данные напечатанных и выданных документов. Исправляйте выпускников в "
+                    + "карточках; удалите этот выпуск из промежуточной зоны");
+            }
             final String target = earlier == null ? id : earlier;
             final String now = Instant.now().toString();
             final Map<GraduateRecord, String> kept = new IdentityHashMap<>();
@@ -470,6 +481,7 @@ public final class Graduations {
      * journal of the graduation.
      *
      * @param name the name of the graduate for the journal
+     * @throws IllegalArgumentException when a document the corrections change is printed and not handed (ADR-0013)
      */
     public void edit(
         final String graduationId, final String graduateId, final String name, final List<Edits.Edit> kept,
@@ -477,6 +489,18 @@ public final class Graduations {
     ) throws SQLException {
         try (Connection connection = this.database.connection()) {
             connection.setAutoCommit(false);
+            final Set<String> kinds = new LinkedHashSet<>();
+            for (final List<Edits.Edit> edits : List.of(kept, removed)) {
+                for (final Edits.Edit edit : edits) {
+                    kinds.addAll(Stock.kinds(edit));
+                }
+            }
+            final List<Stock.Blank> printed = Stock.unhanded(connection, graduateId, kinds);
+            if (!printed.isEmpty()) {
+                throw new IllegalArgumentException("Документ напечатан и ещё не выдан: " + Stock.labels(printed)
+                    + ". Правка разойдётся с напечатанным: сначала отметьте бланк испорченным, затем правьте и "
+                    + "печатайте заново. ФИО и решение ГЭК есть на дипломе и на приложении, остальное — на приложении");
+            }
             for (final Edits.Edit edit : removed) {
                 try (PreparedStatement delete = connection.prepareStatement(
                     "DELETE FROM graduate_edit WHERE id = ? AND graduate_id = ?"

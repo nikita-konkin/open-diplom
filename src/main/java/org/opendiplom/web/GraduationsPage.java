@@ -58,7 +58,7 @@ final class GraduationsPage extends HttpServlet {
     private static final long serialVersionUID = 1L;
     private static final String TITLE = "Выпуски";
     private static final Pattern ROUTE = Pattern.compile(
-        "^/graduations(?:/(new)|/([0-9a-f-]{36})(?:/(match|xml|delete|numbers)|/graduates/([0-9a-f-]{36})(/duplicate|/edit)?)?)?/?$"
+        "^/graduations(?:/(new)|/([0-9a-f-]{36})(?:/(match|xml|delete|numbers|blanks|issue)|/graduates/([0-9a-f-]{36})(/duplicate|/edit|/blanks)?)?)?/?$"
     );
     private static final String STATEMENT = "statement.bin";
     private static final String INFO = "info.bin";
@@ -85,7 +85,7 @@ final class GraduationsPage extends HttpServlet {
                 this.list(response);
             } else if (route.group(4) != null && route.group(5) == null) {
                 this.card(route.group(2), route.group(4), request, response);
-            } else if (route.group(4) != null || "numbers".equals(route.group(3))) {
+            } else if (route.group(4) != null || route.group(3) != null && Set.of("numbers", "blanks", "issue").contains(route.group(3))) {
                 response.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
             } else if ("match".equals(route.group(3))) {
                 this.match(route.group(2), response, Collections.emptyList());
@@ -110,6 +110,8 @@ final class GraduationsPage extends HttpServlet {
                 response.sendError(HttpServletResponse.SC_NOT_FOUND);
             } else if ("/edit".equals(route.group(5))) {
                 this.edit(route.group(2), route.group(4), request, response);
+            } else if ("/blanks".equals(route.group(5)) || "blanks".equals(route.group(3)) || "issue".equals(route.group(3))) {
+                this.blanks(route.group(2), route.group(4), route.group(3), request, response);
             } else if (route.group(4) != null) {
                 this.document(route.group(2), route.group(4), route.group(5) != null, request, response);
             } else if ("numbers".equals(route.group(3))) {
@@ -311,7 +313,13 @@ final class GraduationsPage extends HttpServlet {
                 links.add(SubjectMatch.Link.of(row.subject.key(), staged.subjects.plan(), row.target));
             }
         }
-        final String registered = graduations.register(id, graduates, staged.edition.programId, links);
+        final String registered;
+        try {
+            registered = graduations.register(id, graduates, staged.edition.programId, links);
+        } catch (final IllegalStateException error) {
+            this.match(id, response, Collections.singletonList(error.getMessage()));
+            return;
+        }
         this.forget(id);
         response.sendRedirect(request.getContextPath() + "/graduations/" + registered);
     }
@@ -390,8 +398,10 @@ final class GraduationsPage extends HttpServlet {
         list(body, "Что мешает XML", registered.programProblems);
         body.append("</section><section><h2>Выпускники: ").append(registered.graduates.size()).append("</h2>")
             .append(GraduationView.graduates(id, registered.graduates, registered.findings, registered.originals,
-                registered.honors, registered.printing)).append("</section>");
-        body.append(GraduationView.documents(id, registered.organization, registered.printing, request.getParameter("note")));
+                registered.honors, registered.printing, Issuing.states(registered))).append("</section>");
+        body.append(GraduationView.documents(id, registered.organization, registered.printing, request.getParameter("note"),
+            mixed(registered)));
+        body.append(new Issuing(this.database).graduation(registered));
         body.append("<section><h2>XML для КиберДиплома</h2>");
         final long blocked = registered.findings.stream().filter(own -> !Checks.exportable(own)).count();
         final long unfinished = registered.findings.stream()
@@ -445,6 +455,7 @@ final class GraduationsPage extends HttpServlet {
                     + GraduationView.findings(registered.findings.get(number)) + "</section>"
                     + GraduationView.document(id, record, registered.originals.get(number), registered.honors.get(number),
                         registered.printing.get(number), registered.documents.getOrDefault(record.id, List.of()))
+                    + new Issuing(this.database).card(registered, number)
                     + GraduationView.card(id, record, registered.files.get(number),
                         registered.edits.getOrDefault(record.id, List.of()), registered.plan);
                 Responses.html(response, HttpServletResponse.SC_OK, Html.page(TITLE, body));
@@ -589,11 +600,48 @@ final class GraduationsPage extends HttpServlet {
             }
             changes = new Edits.Changes(List.of(), removed);
         }
-        new Graduations(this.database).edit(id, graduate, record.fullName(), changes.kept, changes.removed);
+        try {
+            new Graduations(this.database).edit(id, graduate, record.fullName(), changes.kept, changes.removed);
+        } catch (final IllegalArgumentException error) {
+            this.problem(response, record.fullName() + ": " + error.getMessage());
+            return;
+        }
         final String note = changes.kept.isEmpty() && changes.removed.isEmpty() ? "Правок нет: значения как были"
             : "Правок сохранено: " + changes.kept.size() + ", снято: " + changes.removed.size();
         response.sendRedirect(request.getContextPath() + "/graduations/" + id + "/graduates/" + graduate + "?note="
             + URLEncoder.encode(note, StandardCharsets.UTF_8));
+    }
+
+    /** The blanks of the printed run, the handing in person, or an action on a document of a card (ADR-0013). */
+    private void blanks(
+        final String id, final String graduate, final String what, final HttpServletRequest request,
+        final HttpServletResponse response
+    ) throws IOException, SQLException {
+        final Registered registered = this.registered(id, response);
+        if (registered == null) {
+            return;
+        }
+        if (registered.graduation.staging() || registered.edition == null) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
+        final Issuing issuing = new Issuing(this.database);
+        if (graduate != null) {
+            issuing.document(registered, graduate, request, response);
+        } else if ("blanks".equals(what)) {
+            issuing.blanks(registered, request, response);
+        } else {
+            issuing.issue(registered, request, response);
+        }
+    }
+
+    /** Whether the graduation has diplomas «с отличием» and without: they are printed on blanks of two forms. */
+    private static boolean mixed(final Registered registered) {
+        final Set<Boolean> honors = new LinkedHashSet<>();
+        for (int number = 0; number < registered.graduates.size(); ++number) {
+            honors.add(registered.originals.get(number).honors(registered.honors.get(number)));
+        }
+        return honors.size() > 1;
     }
 
     private void xml(final String id, final HttpServletResponse response) throws IOException, SQLException {

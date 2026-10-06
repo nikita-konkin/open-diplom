@@ -24,6 +24,7 @@ import org.opendiplom.printing.BlankTemplate;
 import org.opendiplom.printing.Fonts;
 import org.opendiplom.storage.Blanks;
 import org.opendiplom.storage.Database;
+import org.opendiplom.storage.Stock;
 
 /**
  * Diplomas and supplements of a graduation as PDF for the blanks (ADR-0011):
@@ -34,6 +35,10 @@ import org.opendiplom.storage.Database;
  * data has not, a text that does not fit, a table that took another page —
  * unless the operator accepts the faults. A sample prints whatever is there,
  * marked «ОБРАЗЕЦ», with the faults on a last page.
+ *
+ * <p>A document written on a blank of the kind is not printed again until
+ * that blank is marked spoiled (ADR-0013): the print of a graduation leaves
+ * it out, the print of the graduate is refused.
  */
 final class PrintPage extends HttpServlet {
     private static final long serialVersionUID = 1L;
@@ -52,7 +57,18 @@ final class PrintPage extends HttpServlet {
     static String link(
         final String graduation, final String kind, final String graduate, final String document, final boolean sample
     ) {
+        return link(graduation, kind, graduate, document, sample, null);
+    }
+
+    /** The address of a PDF; of the diplomas «с отличием» only with {@code honors} «1», without with «0». */
+    static String link(
+        final String graduation, final String kind, final String graduate, final String document, final boolean sample,
+        final String honors
+    ) {
         final List<String> query = new ArrayList<>();
+        if (honors != null) {
+            query.add("honors=" + honors);
+        }
         if (graduate != null) {
             query.add("graduate=" + graduate);
         }
@@ -112,8 +128,10 @@ final class PrintPage extends HttpServlet {
         final BlankTemplate template = BlankTemplate.of(stored.content);
         final boolean apart = template.datasets().contains(BlankData.COURSE_WORKS);
         final String only = request.getParameter("graduate");
+        final String honors = Blanks.DIPLOMA.equals(kind) ? request.getParameter("honors") : null;
         final List<BlankData> documents = new ArrayList<>();
         final List<String> refused = new ArrayList<>();
+        final List<String> printed = new ArrayList<>();
         String name = registered.graduation.groupName;
         for (int number = 0; number < registered.graduates.size(); ++number) {
             final GraduateRecord graduate = registered.graduates.get(number);
@@ -125,6 +143,15 @@ final class PrintPage extends HttpServlet {
                 response.sendError(HttpServletResponse.SC_NOT_FOUND);
                 return;
             }
+            final boolean honored = document.honors(registered.honors.get(number));
+            if (honors != null && honored != "1".equals(honors)) {
+                continue;
+            }
+            final Stock.Blank blank = document.id == null ? null : registered.used(document.id, kind);
+            if (!sample && blank != null) {
+                printed.add(graduate.fullName() + ": " + blank.form.title() + " " + blank.label());
+                continue;
+            }
             final List<Checks.Finding> findings = document == registered.originals.get(number)
                 ? registered.printing.get(number)
                 : Checks.printing(registered.findings.get(number), graduate, document, registered.honors.get(number),
@@ -135,12 +162,17 @@ final class PrintPage extends HttpServlet {
                 }
             }
             documents.add(BlankData.of(
-                registered.program, graduate, document, document.honors(registered.honors.get(number)),
+                registered.program, graduate, document, honored,
                 registered.organization, Checks.stateExam(registered.plan), apart
             ));
             if (only != null) {
                 name += " " + graduate.lastName;
             }
+        }
+        if (documents.isEmpty() && !printed.isEmpty()) {
+            Responses.problem(response, TITLE, "Не напечатано: документы уже записаны на бланки. Если бланк испорчен, "
+                + "отметьте это в карточке выпускника — тогда документ напечатается снова.\n" + String.join("\n", printed));
+            return;
         }
         if (documents.isEmpty()) {
             response.sendError(HttpServletResponse.SC_NOT_FOUND);
