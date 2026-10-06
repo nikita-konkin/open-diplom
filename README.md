@@ -30,6 +30,8 @@ java -jar target/open-diplom.jar
 
 Программа откроет браузер на http://127.0.0.1:8090/ и создаст папку `data` с базой SQLite.
 
+В jar лежат нативные библиотеки SQLite только для Windows и Linux (x86, x86-64, aarch64). Сборка на Mac добавляет и библиотеки Mac (профиль `mac` включается сам), а jar, собранный в Docker, на Mac не запустится.
+
 Поставка без установленной Java: `scripts/build-dist.sh` собирает папку `dist/open-diplom` — урезанный рантайм, программу и запускатели `open-diplom.cmd` (Windows) и `open-diplom.sh`.
 
 На сервере с Docker — контейнер (сборка образа прогоняет все тесты):

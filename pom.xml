@@ -26,6 +26,8 @@
     <pdfbox.version>3.0.8</pdfbox.version>
     <sqlite.version>3.53.4.0</sqlite.version>
     <junit.version>5.14.4</junit.version>
+    <!-- SQLite natives of the Mac are left out of the release; a build on a Mac keeps them (profile mac) -->
+    <sqlite.mac.natives>org/sqlite/native/Mac/**</sqlite.mac.natives>
   </properties>
 
   <dependencies>
@@ -94,6 +96,21 @@
                     <exclude>META-INF/MANIFEST.MF</exclude>
                   </excludes>
                 </filter>
+                <!-- Windows and Linux on x86, x86_64 and aarch64 (ADR-0006); the other platforms take half the jar -->
+                <filter>
+                  <artifact>org.xerial:sqlite-jdbc</artifact>
+                  <excludes>
+                    <exclude>org/sqlite/native/FreeBSD/**</exclude>
+                    <exclude>org/sqlite/native/Linux-Musl/**</exclude>
+                    <exclude>org/sqlite/native/Linux/arm/**</exclude>
+                    <exclude>org/sqlite/native/Linux/armv6/**</exclude>
+                    <exclude>org/sqlite/native/Linux/armv7/**</exclude>
+                    <exclude>org/sqlite/native/Linux/ppc64/**</exclude>
+                    <exclude>org/sqlite/native/Linux/riscv64/**</exclude>
+                    <exclude>org/sqlite/native/Windows/armv7/**</exclude>
+                    <exclude>${sqlite.mac.natives}</exclude>
+                  </excludes>
+                </filter>
               </filters>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
@@ -112,4 +129,18 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <id>mac</id>
+      <activation>
+        <os>
+          <family>mac</family>
+        </os>
+      </activation>
+      <properties>
+        <sqlite.mac.natives>org/sqlite/native/Mac/none</sqlite.mac.natives>
+      </properties>
+    </profile>
+  </profiles>
 </project>
