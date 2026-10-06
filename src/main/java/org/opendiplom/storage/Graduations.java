@@ -10,12 +10,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.opendiplom.catalog.GraduateRecord;
 import org.opendiplom.catalog.ResultRecord;
 import org.opendiplom.export.Names;
+import org.opendiplom.graduation.Edits;
 import org.opendiplom.graduation.StudentMatch;
 import org.opendiplom.graduation.SubjectMatch;
 
@@ -27,7 +30,9 @@ import org.opendiplom.graduation.SubjectMatch;
  * <p>A statement often comes before every subject is graded, and the group is
  * loaded again with a fuller one. So the operator's choices about students
  * stay with the registered graduation and go to the next loading of the
- * group; the choices about subjects become links of the program.
+ * group; the choices about subjects become links of the program. So do the
+ * operator's corrections of a graduate (ADR-0012): they are kept apart from
+ * what the files gave and stay with a graduate found again by the name.
  */
 public final class Graduations {
     public static final String STAGING = "staging";
@@ -37,7 +42,7 @@ public final class Graduations {
         "staged", "файлы загружены", "registered", "записан в картотеку",
         "replaced", "выпускники заменены повторным импортом", "chairman", "председатель ГЭК",
         Documents.NUMBERS, "регистрационные номера и дата выдачи", Documents.DOCUMENT, "документ выпускника",
-        Documents.DUPLICATE, "дубликат"
+        Documents.DUPLICATE, "дубликат", "edit", "правка в карточке выпускника"
     );
 
     private final Database database;
@@ -250,9 +255,10 @@ public final class Graduations {
      * Writes a staged graduation to the registry; of its choices, those about
      * students stay with it. When the same group of the same curriculum is
      * there already, its graduates and choices are replaced and it keeps its
-     * identifier and chairman. A graduate found again by the name keeps the
-     * identifier and the documents; the documents of one no longer there go
-     * with the graduate.
+     * identifier and chairman. A graduate found again by the name, as the
+     * files had it or as the operator corrected it, keeps the identifier, the
+     * documents and the corrections; those of one no longer there go with the
+     * graduate.
      *
      * @return the identifier of the registered graduation
      */
@@ -276,21 +282,24 @@ public final class Graduations {
                 final Map<String, String> before = keys(connection, earlier);
                 for (final GraduateRecord graduate : graduates) {
                     final String key = Names.key(graduate.fullName());
-                    String found = before.remove(key);
+                    String found = before.get(key);
                     if (found == null) {
-                        found = before.remove(key + "|" + graduate.birthDate);
+                        found = before.get(key + "|" + graduate.birthDate);
                     }
                     if (found != null) {
                         kept.put(graduate, found);
+                        before.values().removeIf(found::equals);
                     }
                 }
                 final List<String> freed = new ArrayList<>();
-                for (final String gone : before.values()) {
-                    freed.addAll(Documents.forget(connection, gone));
-                    delete(connection, "DELETE FROM graduate WHERE id = ?", gone);
+                final Set<String> gone = new LinkedHashSet<>(before.values());
+                for (final String graduate : gone) {
+                    freed.addAll(Documents.forget(connection, graduate));
+                    delete(connection, "DELETE FROM graduate_edit WHERE graduate_id = ?", graduate);
+                    delete(connection, "DELETE FROM graduate WHERE id = ?", graduate);
                 }
-                if (!before.isEmpty()) {
-                    audit(connection, earlier, "replaced", "выпускников больше нет в файлах: " + before.size()
+                if (!gone.isEmpty()) {
+                    audit(connection, earlier, "replaced", "выпускников больше нет в файлах: " + gone.size()
                         + (freed.isEmpty() ? "" : ", освобождены регистрационные номера: " + String.join(", ", freed)));
                 }
                 try (PreparedStatement update = connection.prepareStatement(
@@ -430,6 +439,85 @@ public final class Graduations {
         return graduates;
     }
 
+    /** Corrections of the graduates of a graduation, by graduate (ADR-0012). */
+    public Map<String, List<Edits.Edit>> edits(final String graduationId) throws SQLException {
+        final Map<String, List<Edits.Edit>> edits = new LinkedHashMap<>();
+        try (Connection connection = this.database.connection();
+             PreparedStatement query = connection.prepareStatement(
+                 "SELECT e.* FROM graduate_edit e JOIN graduate g ON g.id = e.graduate_id WHERE g.graduation_id = ? "
+                     + "ORDER BY e.edited_at"
+             )) {
+            query.setString(1, graduationId);
+            try (ResultSet row = query.executeQuery()) {
+                while (row.next()) {
+                    final String index = row.getString("element_index");
+                    final String key = row.getString("element_key");
+                    final Edits.Place place = key.isEmpty() ? null : new Edits.Place(
+                        index, key, row.getString("alternative_key"), row.getInt("course_work") == 1
+                    );
+                    edits.computeIfAbsent(row.getString("graduate_id"), any -> new ArrayList<>()).add(new Edits.Edit(
+                        row.getString("id"), row.getString("field"), place, row.getString("printed"),
+                        row.getString("value"), row.getString("original"), row.getString("edited_at")
+                    ));
+                }
+            }
+        }
+        return edits;
+    }
+
+    /**
+     * Keeps corrections of a graduate and takes others off, each in the
+     * journal of the graduation.
+     *
+     * @param name the name of the graduate for the journal
+     */
+    public void edit(
+        final String graduationId, final String graduateId, final String name, final List<Edits.Edit> kept,
+        final List<Edits.Edit> removed
+    ) throws SQLException {
+        try (Connection connection = this.database.connection()) {
+            connection.setAutoCommit(false);
+            for (final Edits.Edit edit : removed) {
+                try (PreparedStatement delete = connection.prepareStatement(
+                    "DELETE FROM graduate_edit WHERE id = ? AND graduate_id = ?"
+                )) {
+                    delete.setString(1, edit.id);
+                    delete.setString(2, graduateId);
+                    if (delete.executeUpdate() > 0) {
+                        audit(connection, graduationId, "edit", name + ": " + edit.title() + ": правка «"
+                            + edit.value + "» снята, как в файлах");
+                    }
+                }
+            }
+            for (final Edits.Edit edit : kept) {
+                if (!edit.id.isEmpty()) {
+                    delete(connection, "DELETE FROM graduate_edit WHERE id = ?", edit.id);
+                }
+                try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO graduate_edit (id, graduate_id, field, element_index, element_key, alternative_key, "
+                        + "course_work, printed, value, original, edited_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )) {
+                    insert.setString(1, edit.id.isEmpty() ? UUID.randomUUID().toString() : edit.id);
+                    insert.setString(2, graduateId);
+                    insert.setString(3, edit.field);
+                    insert.setString(4, edit.place == null ? "" : edit.place.elementIndex);
+                    insert.setString(5, edit.place == null ? "" : edit.place.elementKey);
+                    insert.setString(6, edit.place == null ? "" : edit.place.alternativeKey);
+                    insert.setInt(7, edit.place != null && edit.place.courseWork ? 1 : 0);
+                    insert.setString(8, edit.printed);
+                    insert.setString(9, edit.value);
+                    insert.setString(10, edit.original);
+                    insert.setString(11, edit.editedAt);
+                    insert.executeUpdate();
+                }
+                audit(connection, graduationId, "edit", name + ": " + edit.title() + ": "
+                    + (edit.original.isEmpty() ? "пусто" : "«" + edit.original + "»") + " → "
+                    + (edit.value.isEmpty() ? "пусто" : "«" + edit.value + "»"));
+            }
+            connection.commit();
+        }
+    }
+
     /** What was done to a graduation, oldest first: «время — действие — подробности». */
     public List<String> history(final String id) throws SQLException {
         final List<String> history = new ArrayList<>();
@@ -470,6 +558,8 @@ public final class Graduations {
     /**
      * Graduates of a graduation by the key of the name; of namesakes, by the
      * name with the date of birth, so that neither takes the other's documents.
+     * A name the operator corrected finds the graduate too: the files may come
+     * corrected the same way.
      */
     private static Map<String, String> keys(final Connection connection, final String graduation) throws SQLException {
         final Map<String, List<String[]>> names = new LinkedHashMap<>();
@@ -492,6 +582,34 @@ public final class Graduations {
                 // namesakes born the same day are told apart by nobody: each stays under its id, to be removed
                 keys.put(keys.containsKey(key) ? "#" + graduate[0] : key, graduate[0]);
             }
+        }
+        final Map<String, Map<String, String>> corrected = new LinkedHashMap<>();
+        try (PreparedStatement query = connection.prepareStatement(
+            "SELECT g.id, g.last_name, g.first_name, g.middle_name, e.field, e.value FROM graduate g "
+                + "JOIN graduate_edit e ON e.graduate_id = g.id WHERE g.graduation_id = ? "
+                + "AND e.field IN ('last_name', 'first_name', 'middle_name')"
+        )) {
+            query.setString(1, graduation);
+            try (ResultSet row = query.executeQuery()) {
+                while (row.next()) {
+                    Map<String, String> name = corrected.get(row.getString(1));
+                    if (name == null) {
+                        name = new LinkedHashMap<>();
+                        name.put("last_name", row.getString(2));
+                        name.put("first_name", row.getString(3));
+                        name.put("middle_name", row.getString(4));
+                        corrected.put(row.getString(1), name);
+                    }
+                    name.put(row.getString(5), row.getString(6));
+                }
+            }
+        }
+        for (final Map.Entry<String, Map<String, String>> name : corrected.entrySet()) {
+            final Map<String, String> parts = name.getValue();
+            keys.putIfAbsent(
+                Names.key(parts.get("last_name") + " " + parts.get("first_name") + " " + parts.get("middle_name")),
+                name.getKey()
+            );
         }
         return keys;
     }

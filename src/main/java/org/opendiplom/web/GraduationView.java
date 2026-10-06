@@ -1,6 +1,7 @@
 package org.opendiplom.web;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.opendiplom.catalog.Checks;
@@ -9,6 +10,8 @@ import org.opendiplom.catalog.GraduateRecord;
 import org.opendiplom.catalog.Honors;
 import org.opendiplom.catalog.Organization;
 import org.opendiplom.catalog.ResultRecord;
+import org.opendiplom.graduation.Edits;
+import org.opendiplom.graduation.Results;
 import org.opendiplom.graduation.StudentMatch;
 import org.opendiplom.graduation.SubjectMatch;
 import org.opendiplom.imports.Kind;
@@ -299,36 +302,145 @@ final class GraduationView {
         return html.append("</ul>").toString();
     }
 
-    /** The personal data, the attestation and the results of a graduate. */
-    static String card(final GraduateRecord graduate, final PlanStructure plan) {
-        final StringBuilder html = new StringBuilder("<section><h2>Сведения</h2><table>")
-            .append(row("ФИО", graduate.fullName()))
-            .append(row("Дата рождения", graduate.birthDate))
-            .append(row("Документ о предыдущем образовании", graduate.previousDocument))
-            .append(row("Год документа", graduate.previousYear))
-            .append(row("Дата решения ГЭК", graduate.gekDate))
-            .append(row("Номер протокола ГЭК", graduate.gekProtocol))
-            .append(row("Лист ведомости", graduate.statementName))
-            .append(row("Номер студента", graduate.studentNumber))
-            .append("</table>");
+    /**
+     * The personal data, the attestation and the results of a graduate as a
+     * form of corrections (ADR-0012); beside a corrected value, what the files
+     * have. An element the statement has no grade for may get one here.
+     */
+    static String card(
+        final String graduation, final GraduateRecord graduate, final GraduateRecord files, final List<Edits.Edit> edits,
+        final PlanStructure plan
+    ) {
+        final String action = "graduations/" + graduation + "/graduates/" + graduate.id + "/edit";
+        final StringBuilder html = new StringBuilder("<form method=\"post\" action=\"").append(action).append("\">")
+            .append("<section><h2>Сведения</h2><p class=\"muted\">Правки ложатся поверх файлов и остаются при ")
+            .append("повторной загрузке группы. Значение, возвращённое к файлам, снимает правку.</p><table class=\"edit\">");
+        for (final String column : Arrays.asList("last_name", "first_name", "middle_name", "birth_date",
+            "previous_document", "previous_year", "gek_date", "gek_protocol")) {
+            html.append(column(column, graduate, files));
+        }
+        html.append(row("Лист ведомости", graduate.statementName).replace("</tr>", "<td></td></tr>"))
+            .append(row("Номер студента", graduate.studentNumber).replace("</tr>", "<td></td></tr>")).append("</table>");
         if (!graduate.notes.isEmpty()) {
             html.append("<p class=\"note\">При чтении файла сведений: ").append(Html.escape(graduate.notes)).append("</p>");
         }
-        html.append("</section><section><h2>Государственная итоговая аттестация</h2><table>")
-            .append(row("Государственный экзамен", grade(graduate.stateExamGrade)))
-            .append(row("Тема ВКР", graduate.thesisTopic))
-            .append(row("Оценка ВКР", grade(graduate.thesisGrade)))
-            .append("</table></section><section><h2>Результаты</h2><div class=\"scroll\"><table><tr>")
-            .append("<th>Индекс</th><th>В приложении</th><th>Вид</th><th>Оценка</th><th>З.е.</th></tr>");
-        for (final ResultRecord result : graduate.results) {
-            html.append("<tr><td>").append(Html.escape(plan.items().get(result.element).row().index()))
-                .append("</td><td>").append(Html.escape(result.printed))
-                .append("</td><td>").append(Html.escape(result.kind))
-                .append("</td><td>").append(Html.escape(result.grade == null ? result.gradeText : grade(result.grade)))
-                .append("</td><td>").append(result.credits == null ? "" : PlanTotals.number(result.credits))
-                .append("</td></tr>");
+        html.append("<button>Сохранить правки</button></section><section><h2>Государственная итоговая аттестация</h2>")
+            .append("<table class=\"edit\">");
+        for (final String column : Arrays.asList("state_exam_grade", "thesis_topic", "thesis_grade")) {
+            html.append(column(column, graduate, files));
         }
-        return html.append("</table></div></section>").toString();
+        html.append("</table><button>Сохранить правки</button></section><section><h2>Результаты</h2>")
+            .append("<p class=\"muted\">Предмет, изученный сверх выбранного, можно перенести в факультативы.</p>")
+            .append("<div class=\"scroll\"><table><tr><th>Индекс</th><th>В приложении</th><th>Вид</th><th>Оценка</th>")
+            .append("<th>З.е.</th><th>В файлах</th></tr>");
+        for (final ResultRecord result : graduate.results) {
+            final boolean work = ResultRecord.COURSE_WORK.equals(result.kind);
+            ResultRecord file = null;
+            for (final ResultRecord candidate : files.results) {
+                if (candidate.element == result.element && ResultRecord.COURSE_WORK.equals(candidate.kind) == work) {
+                    file = candidate;
+                }
+            }
+            html.append("<tr><td>").append(Html.escape(plan.items().get(result.element).row().index()))
+                .append("</td><td>").append(Html.escape(result.printed)).append("</td><td>");
+            if (file != null && Edits.movable(result.kind)) {
+                html.append(select(Edits.name(result.element, false, Edits.KIND), result.kind,
+                    ResultRecord.DISCIPLINE, ResultRecord.DISCIPLINE, ResultRecord.FACULTATIVE, ResultRecord.FACULTATIVE));
+            } else {
+                html.append(Html.escape(result.kind));
+            }
+            html.append("</td><td>").append(grades(Edits.name(result.element, work, Edits.GRADE), result.grade))
+                .append("</td><td>");
+            if (file != null && result.credits != null) {
+                html.append("<input type=\"text\" class=\"short\" name=\"")
+                    .append(Edits.name(result.element, false, Edits.CREDITS)).append("\" value=\"")
+                    .append(PlanTotals.number(result.credits)).append("\">");
+            } else if (result.credits != null) {
+                html.append(PlanTotals.number(result.credits));
+            }
+            html.append("</td><td class=\"muted\">").append(Html.escape(differences(result, file))).append("</td></tr>");
+        }
+        for (final Checks.Missing missing : Checks.missing(graduate, plan)) {
+            final PlanItem item = missing.item;
+            html.append("<tr class=\"error\"><td>").append(Html.escape(item.row().index())).append("</td><td>")
+                .append(Html.escape(Edits.printed(item, "", missing.courseWork))).append("</td><td>")
+                .append(Html.escape(missing.courseWork ? ResultRecord.COURSE_WORK : Results.kind(item))).append("</td><td>")
+                .append(item.alternatives().isEmpty() ? grades(Edits.name(item.position(), missing.courseWork, Edits.GRADE), null)
+                    : "дисциплину по выбору свяжите при повторной загрузке файлов")
+                .append("</td><td>").append(missing.courseWork || item.row().credits() == null ? ""
+                    : PlanTotals.number(item.row().credits()))
+                .append("</td><td class=\"muted\">нет в ведомости</td></tr>");
+        }
+        html.append("</table></div><button>Сохранить правки</button></section></form>");
+        if (!edits.isEmpty()) {
+            html.append("<section><h2>Правки</h2><table><tr><th>Что</th><th>В файлах при правке</th><th>Правка</th>")
+                .append("<th>Когда</th><th></th></tr>");
+            for (final Edits.Edit edit : edits) {
+                html.append("<tr><td>").append(Html.escape(edit.title())).append("</td><td>")
+                    .append(Html.escape(edit.original.isEmpty() ? "—" : edit.original)).append("</td><td>")
+                    .append(Html.escape(edit.value.isEmpty() ? "—" : edit.value))
+                    .append("</td><td>").append(Html.escape(PlanView.time(edit.editedAt)))
+                    .append("</td><td><form method=\"post\" action=\"").append(action)
+                    .append("\"><input type=\"hidden\" name=\"revert\" value=\"").append(Html.escape(edit.id))
+                    .append("\"><button>Снять</button></form></td></tr>");
+            }
+            html.append("</table></section>");
+        }
+        return html.toString();
+    }
+
+    /** A column of the graduate as a field of the form, with what the files have when corrected. */
+    private static String column(final String column, final GraduateRecord graduate, final GraduateRecord files) {
+        final String value = Edits.column(graduate, column);
+        final String file = Edits.column(files, column);
+        final StringBuilder html = new StringBuilder("<tr><th>").append(Html.escape(Edits.COLUMNS.get(column)))
+            .append("</th><td>");
+        if (Edits.GRADES.contains(column)) {
+            html.append(grades(column, value.isEmpty() ? null : Integer.valueOf(value)));
+        } else if ("thesis_topic".equals(column)) {
+            html.append("<textarea name=\"").append(column).append("\" rows=\"3\">").append(Html.escape(value))
+                .append("</textarea>");
+        } else {
+            html.append("<input type=\"").append(Edits.DATES.contains(column) ? "date" : "text").append("\" name=\"")
+                .append(column).append("\" value=\"").append(Html.escape(value)).append("\">");
+        }
+        return html.append("</td><td class=\"muted\">").append(value.equals(file) ? ""
+            : Html.escape("в файлах: " + (file.isEmpty() ? "пусто" : "«" + file + "»"))).append("</td></tr>").toString();
+    }
+
+    /** What the files have where a result differs from them. */
+    private static String differences(final ResultRecord result, final ResultRecord file) {
+        if (file == null) {
+            return "нет в ведомости, оценка введена вручную";
+        }
+        final List<String> differences = new ArrayList<>();
+        if (!Edits.grade(file).equals(Edits.grade(result))) {
+            differences.add("оценка " + (Edits.grade(file).isEmpty() ? "пусто" : "«" + Edits.grade(file) + "»"));
+        } else if (result.grade == null && !result.gradeText.isEmpty()) {
+            differences.add("в ведомости «" + result.gradeText + "» — не код оценки");
+        }
+        if (file.credits != null && !file.credits.equals(result.credits)) {
+            differences.add("з.е. " + PlanTotals.number(file.credits));
+        }
+        if (!file.kind.equals(result.kind)) {
+            differences.add(file.kind);
+        }
+        return String.join(", ", differences);
+    }
+
+    /** A choice of a grade code, with «нет оценки». */
+    private static String grades(final String name, final Integer current) {
+        return select(name, current == null ? "" : String.valueOf(current), "", "нет оценки", "2", "2", "3", "3",
+            "4", "4", "5", "5", "6", grade(6), "7", grade(7));
+    }
+
+    /** A select of value and label pairs. */
+    private static String select(final String name, final String current, final String... pairs) {
+        final StringBuilder html = new StringBuilder("<select name=\"").append(Html.escape(name)).append("\">");
+        for (int index = 0; index < pairs.length; index += 2) {
+            html.append(option(pairs[index], pairs[index + 1], current));
+        }
+        return html.append("</select>").toString();
     }
 
     /** «5», «зачтено (6)», «не выполнял (7)», empty for none. */

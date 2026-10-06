@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.opendiplom.Plans;
 import org.opendiplom.catalog.GraduateRecord;
 import org.opendiplom.catalog.ResultRecord;
+import org.opendiplom.graduation.Edits;
 import org.opendiplom.graduation.SubjectMatch;
 import org.opendiplom.plans.PlanHeader;
 
@@ -126,6 +128,68 @@ final class GraduationsTest {
             "{info:иванов иван=Иванов И. П., sheet:Иванов И. И.=-} {info:иванов иван=Иванов И. П.}",
             new TreeMap<>(inherited) + " " + this.graduations.choices(registered),
             "The choices about students did not come to the next loading of the group, or the new ones did not replace them"
+        );
+    }
+
+    private static Edits.Edit edit(final String field, final Edits.Place place, final String value, final String original) {
+        return new Edits.Edit("", field, place, place == null ? "" : "Математика", value, original, "2026-07-01T09:00:00Z");
+    }
+
+    private static String fields(final List<Edits.Edit> edits) {
+        final List<String> fields = new ArrayList<>();
+        for (final Edits.Edit edit : edits) {
+            fields.add(edit.field + "=" + edit.value);
+        }
+        return fields.toString();
+    }
+
+    @Test
+    void cannotLoseCorrectionsOnImportOfSameGroup() throws Exception {
+        final String id = this.graduations.register(
+            this.staged(), Arrays.asList(graduate(0, "Иванов", 3), graduate(1, "Петров", 4)), this.programId(),
+            Collections.emptyList()
+        );
+        final List<GraduateRecord> first = this.graduations.graduates(id);
+        this.graduations.edit(id, first.get(0).id, first.get(0).fullName(), Arrays.asList(
+            edit("gek_protocol", null, "7", "3"), edit(Edits.GRADE, new Edits.Place("Б.1.1.1", "математика", "", false), "5", "3")
+        ), Collections.emptyList());
+        this.graduations.edit(id, first.get(1).id, first.get(1).fullName(),
+            Collections.singletonList(edit("gek_protocol", null, "8", "3")), Collections.emptyList());
+        this.graduations.register(
+            this.staged(), Collections.singletonList(graduate(0, "Иванов", 4)), this.programId(), Collections.emptyList()
+        );
+        final Map<String, List<Edits.Edit>> edits = this.graduations.edits(id);
+        assertEquals(
+            "1 [gek_protocol=7, grade=5] true",
+            edits.size() + " " + fields(edits.get(first.get(0).id)) + " "
+                + this.graduations.history(id).stream().anyMatch(entry -> entry.contains(
+                    "правка в карточке выпускника — Иванов Иван Иванович: Номер протокола ГЭК: «3» → «7»")),
+            "The corrections of a graduate loaded again were lost, or of one no longer in the files kept, "
+                + "or not written in the journal"
+        );
+        final Edits.Edit protocol = edits.get(first.get(0).id).get(0);
+        this.graduations.edit(id, first.get(0).id, first.get(0).fullName(), Collections.emptyList(),
+            Collections.singletonList(protocol));
+        assertEquals("[grade=5]", fields(this.graduations.edits(id).get(first.get(0).id)),
+            "A correction taken off is still there");
+    }
+
+    @Test
+    void cannotLoseGraduateWhoseNameOperatorCorrected() throws Exception {
+        final String id = this.graduations.register(
+            this.staged(), Collections.singletonList(graduate(0, "Ивонов", 5)), this.programId(), Collections.emptyList()
+        );
+        final String graduate = this.graduations.graduates(id).get(0).id;
+        this.graduations.edit(id, graduate, "Ивонов Иван Иванович",
+            Collections.singletonList(edit("last_name", null, "Иванов", "Ивонов")), Collections.emptyList());
+        // the dean's office corrected the file the same way
+        this.graduations.register(
+            this.staged(), Collections.singletonList(graduate(0, "Иванов", 5)), this.programId(), Collections.emptyList()
+        );
+        assertEquals(
+            graduate + " Иванов 1", this.graduations.graduates(id).get(0).id + " "
+                + this.graduations.graduates(id).get(0).lastName + " " + this.graduations.edits(id).size(),
+            "A graduate whose name came corrected in the files as the operator corrected it was taken for another"
         );
     }
 

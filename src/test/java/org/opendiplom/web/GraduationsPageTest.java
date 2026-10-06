@@ -280,6 +280,55 @@ final class GraduationsPageTest {
     }
 
     @Test
+    void cannotLoseCorrectionOfCardOnNextLoad() throws Exception {
+        // the practice of the first graduate is not in the statement at all
+        final Object[] early = student("Андреев А. А.",
+            row("Математика", 252, null, 5, null), row("Математика", 36, null, null, 4), row("Физика", 144, 5, null, null),
+            row("Теория игр", 72, "V", null, null));
+        final byte[] statement = Books.statement(early, studied("Борисов Б. Б."));
+        final String graduation = this.confirm(this.upload(statement, info(true)));
+        this.post(graduation, Map.of("chairman", "Председатель П. П."));
+        assertEquals(400, this.get(graduation + "/xml").statusCode(), "The XML went out without the practice grade");
+        final Matcher link = Pattern.compile("graduations/[0-9a-f-]{36}/graduates/[0-9a-f-]{36}")
+            .matcher(this.get(graduation).body());
+        assertTrue(link.find(), "No card of a graduate on the page");
+        final String card = link.group();
+        final Map<String, String> form = selects(this.get(card).body());
+        assertEquals("", form.get("r.10.d.grade"), "The card offered no grade for the practice the statement lacks");
+        form.put("r.10.d.grade", "5");
+        form.put("gek_protocol", "7");
+        assertEquals(302, this.post(card + "/edit", form).statusCode(), "The corrections were not taken");
+        final String corrected = this.get(card).body();
+        assertTrue(
+            corrected.contains("в файлах: «3»") && corrected.contains("нет в ведомости, оценка введена вручную"),
+            "The card does not show what the files have beside the corrections: " + corrected
+        );
+        this.confirm(this.upload(statement, info(true)));
+        final HttpResponse<String> xml = this.get(graduation + "/xml");
+        assertTrue(
+            xml.statusCode() == 200 && xml.body().contains("<НомерПротоколаГэк>7</НомерПротоколаГэк>")
+                && xml.body().split("<Практика><Наименование>Производственная практика \\(преддипломная практика\\)"
+                    + "</Наименование><Оценка>5</Оценка><ЗачЕд>6</ЗачЕд></Практика>").length == 3,
+            "The corrections of the card did not reach the XML, or were lost when the group was loaded again: " + xml.body()
+        );
+        assertTrue(
+            this.get(graduation).body().contains("Андреев Андрей Андреевич: «Производственная практика (преддипломная практика)»: "
+                + "оценка: пусто → «5»"),
+            "The correction is not in the journal of the graduation"
+        );
+        final Matcher revert = Pattern.compile("name=\"revert\" value=\"([0-9a-f-]{36})\"").matcher(this.get(card).body());
+        assertTrue(revert.find(), "A correction cannot be taken off");
+        this.post(card + "/edit", Map.of("revert", revert.group(1)));
+        assertTrue(revert.find(), "Only one of the two corrections can be taken off");
+        this.post(card + "/edit", Map.of("revert", revert.group(1)));
+        assertEquals(400, this.get(graduation + "/xml").statusCode(), "The corrections taken off still hold");
+        final Map<String, String> wrong = new LinkedHashMap<>(Map.of("thesis_grade", "8"));
+        final HttpResponse<String> refused = this.post(card + "/edit", wrong);
+        assertTrue(refused.statusCode() == 400 && refused.body().contains("нужен код оценки 2–7"),
+            "A grade that is not a code was taken: " + refused.body());
+    }
+
+    @Test
     void cannotExportGraduateWithoutStateExam() throws Exception {
         final String graduation = this.confirm(this.upload(
             Books.statement(studied("Андреев А. А."), studied("Борисов Б. Б.")), info(false)

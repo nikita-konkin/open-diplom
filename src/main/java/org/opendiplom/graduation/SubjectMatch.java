@@ -325,8 +325,11 @@ public final class SubjectMatch {
         return subjects;
     }
 
-    /** The element of a link in this plan: by name, and by index among equally named ones. */
-    private static Target remembered(final PlanStructure plan, final Link link) {
+    /**
+     * The element of a link in a plan: by name, and by index among equally
+     * named ones; {@code null} when the plan has none such.
+     */
+    static Target remembered(final PlanStructure plan, final Link link) {
         if (link == null) {
             return null;
         }

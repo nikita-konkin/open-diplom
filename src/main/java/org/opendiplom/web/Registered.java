@@ -14,6 +14,7 @@ import org.opendiplom.catalog.Organization;
 import org.opendiplom.export.Program;
 import org.opendiplom.export.ProgramFields;
 import org.opendiplom.export.ValidationProblems;
+import org.opendiplom.graduation.Edits;
 import org.opendiplom.plans.PlanHeader;
 import org.opendiplom.plans.PlanRow;
 import org.opendiplom.plans.PlanStructure;
@@ -23,12 +24,19 @@ import org.opendiplom.storage.Database;
 import org.opendiplom.storage.Documents;
 import org.opendiplom.storage.Graduations;
 
-/** What the pages of a registered graduation show: the program, the checks and the documents. */
+/**
+ * What the pages of a registered graduation show: the program, the checks and
+ * the documents. The graduates are as the files gave them with the operator's
+ * corrections over them (ADR-0012).
+ */
 final class Registered {
     final Graduations.Graduation graduation;
     final Curricula.Edition edition;
     final PlanStructure plan;
-    final List<GraduateRecord> graduates;
+    final List<GraduateRecord> graduates = new ArrayList<>();
+    /** The graduates as the files gave them, and the corrections of each by identifier. */
+    final List<GraduateRecord> files;
+    final Map<String, List<Edits.Edit>> edits;
     final List<List<Checks.Finding>> findings = new ArrayList<>();
     /** The original document, the rule of «с отличием» and the findings for printing, by graduate. */
     final List<DocumentRecord> originals = new ArrayList<>();
@@ -43,12 +51,13 @@ final class Registered {
 
     Registered(
         final Graduations.Graduation graduation, final Curricula.Edition edition, final PlanStructure plan,
-        final PlanTotals totals, final List<GraduateRecord> graduates
+        final PlanTotals totals, final List<GraduateRecord> files, final Map<String, List<Edits.Edit>> edits
     ) {
         this.graduation = graduation;
         this.edition = edition;
         this.plan = plan;
-        this.graduates = graduates;
+        this.files = files;
+        this.edits = edits;
         if (edition == null) {
             this.fields = Collections.emptyMap();
             this.programProblems.add("у выпуска нет учебного плана");
@@ -76,8 +85,10 @@ final class Registered {
             this.programProblems.addAll(error.problems());
         }
         this.program = this.programProblems.isEmpty() ? built : null;
-        for (final GraduateRecord record : graduates) {
-            this.findings.add(Checks.of(record, plan, totals));
+        for (final GraduateRecord record : files) {
+            final Edits.Applied applied = Edits.apply(record, plan, edits.getOrDefault(record.id, List.of()));
+            this.graduates.add(applied.graduate);
+            this.findings.add(Checks.of(applied.graduate, plan, totals, applied.notes));
         }
     }
 
@@ -91,11 +102,12 @@ final class Registered {
         final Curricula curricula = new Curricula(database);
         final Curricula.Edition edition = graduation.curriculumId == null ? null : curricula.find(graduation.curriculumId);
         if (edition == null) {
-            return new Registered(graduation, null, null, null, Collections.emptyList());
+            return new Registered(graduation, null, null, null, Collections.emptyList(), Collections.emptyMap());
         }
         final List<PlanRow> rows = curricula.rows(edition.id);
         final Registered registered = new Registered(
-            graduation, edition, PlanStructure.of(rows), PlanTotals.of(rows), graduations.graduates(id)
+            graduation, edition, PlanStructure.of(rows), PlanTotals.of(rows), graduations.graduates(id),
+            graduations.edits(id)
         );
         final Documents documents = new Documents(database);
         registered.document(documents.of(id), documents.organization());

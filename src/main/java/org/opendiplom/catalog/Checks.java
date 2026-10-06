@@ -63,14 +63,41 @@ public final class Checks {
     private Checks() {
     }
 
+    /** An element of the plan a graduate studies and has no result for, or no result for its course work. */
+    public static final class Missing {
+        public final PlanItem item;
+        public final boolean courseWork;
+        /** A course project, where the plan has a project and no course work. */
+        public final boolean project;
+
+        Missing(final PlanItem item, final boolean courseWork, final boolean project) {
+            this.item = item;
+            this.courseWork = courseWork;
+            this.project = project;
+        }
+    }
+
     /** Findings of a graduate against the plan of the graduation, errors first. */
     public static List<Finding> of(final GraduateRecord graduate, final PlanStructure plan, final PlanTotals totals) {
+        return of(graduate, plan, totals, Collections.emptyList());
+    }
+
+    /** Findings of a graduate with warnings about the operator's corrections (ADR-0012), errors first. */
+    public static List<Finding> of(
+        final GraduateRecord graduate, final PlanStructure plan, final PlanTotals totals, final List<String> corrections
+    ) {
         final List<Finding> findings = new ArrayList<>();
         required(graduate, findings);
         attestation(graduate, plan, findings);
         grades(graduate, findings);
-        coverage(graduate, plan, findings);
+        for (final Missing missing : missing(graduate, plan)) {
+            findings.add(new Finding(Level.ERROR, missing.item.label() + (missing.courseWork
+                ? ": нет оценки за курсов" + (missing.project ? "ой проект" : "ую работу") : ": нет оценки")));
+        }
         credits(graduate, totals, findings);
+        for (final String correction : corrections) {
+            findings.add(new Finding(Level.WARNING, correction));
+        }
         findings.sort((left, right) -> left.level.compareTo(right.level));
         return Collections.unmodifiableList(findings);
     }
@@ -184,11 +211,13 @@ public final class Checks {
     }
 
     /**
-     * Every element a graduate studies has a result: a discipline or a
-     * practice with credits, and a course work where the plan has one. A
-     * result of a group covers its rows; of an elective group, one row is enough.
+     * What a graduate studies and has no result for, in the order of the
+     * plan: a discipline or a practice with credits, and a course work where
+     * the plan has one. A result of a group covers its rows; of an elective
+     * group, one row is enough.
      */
-    private static void coverage(final GraduateRecord graduate, final PlanStructure plan, final List<Finding> findings) {
+    public static List<Missing> missing(final GraduateRecord graduate, final PlanStructure plan) {
+        final List<Missing> missing = new ArrayList<>();
         for (final PlanItem item : plan.leaves()) {
             final PlanItem.Section section = item.section();
             if (section != PlanItem.Section.DISCIPLINES && section != PlanItem.Section.PRACTICES) {
@@ -196,15 +225,15 @@ public final class Checks {
             }
             if (item.row().credits() != null && !covered(graduate, plan, item, false)
                 && !chosenElsewhere(graduate, plan, item)) {
-                findings.add(new Finding(Level.ERROR, item.label() + ": нет оценки"));
+                missing.add(new Missing(item, false, false));
             }
             final List<String> controls = item.row().controls();
             final boolean work = !controls.get(PlanRow.COURSE_WORKS).isEmpty();
             if ((work || !controls.get(PlanRow.COURSE_PROJECTS).isEmpty()) && !covered(graduate, plan, item, true)) {
-                findings.add(new Finding(Level.ERROR,
-                    item.label() + ": нет оценки за курсов" + (work ? "ую работу" : "ой проект")));
+                missing.add(new Missing(item, true, !work));
             }
         }
+        return missing;
     }
 
     private static boolean covered(

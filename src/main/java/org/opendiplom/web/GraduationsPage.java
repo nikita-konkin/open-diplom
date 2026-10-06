@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -32,6 +33,7 @@ import org.opendiplom.export.CyberDiplomaXml;
 import org.opendiplom.export.Program;
 import org.opendiplom.export.StudentInfo;
 import org.opendiplom.export.ValidationProblems;
+import org.opendiplom.graduation.Edits;
 import org.opendiplom.graduation.Results;
 import org.opendiplom.graduation.StudentMatch;
 import org.opendiplom.graduation.SubjectMatch;
@@ -56,7 +58,7 @@ final class GraduationsPage extends HttpServlet {
     private static final long serialVersionUID = 1L;
     private static final String TITLE = "Выпуски";
     private static final Pattern ROUTE = Pattern.compile(
-        "^/graduations(?:/(new)|/([0-9a-f-]{36})(?:/(match|xml|delete|numbers)|/graduates/([0-9a-f-]{36})(/duplicate)?)?)?/?$"
+        "^/graduations(?:/(new)|/([0-9a-f-]{36})(?:/(match|xml|delete|numbers)|/graduates/([0-9a-f-]{36})(/duplicate|/edit)?)?)?/?$"
     );
     private static final String STATEMENT = "statement.bin";
     private static final String INFO = "info.bin";
@@ -106,6 +108,8 @@ final class GraduationsPage extends HttpServlet {
         try {
             if (!route.matches()) {
                 response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            } else if ("/edit".equals(route.group(5))) {
+                this.edit(route.group(2), route.group(4), request, response);
             } else if (route.group(4) != null) {
                 this.document(route.group(2), route.group(4), route.group(5) != null, request, response);
             } else if ("numbers".equals(route.group(3))) {
@@ -441,7 +445,8 @@ final class GraduationsPage extends HttpServlet {
                     + GraduationView.findings(registered.findings.get(number)) + "</section>"
                     + GraduationView.document(id, record, registered.originals.get(number), registered.honors.get(number),
                         registered.printing.get(number), registered.documents.getOrDefault(record.id, List.of()))
-                    + GraduationView.card(record, registered.plan);
+                    + GraduationView.card(id, record, registered.files.get(number),
+                        registered.edits.getOrDefault(record.id, List.of()), registered.plan);
                 Responses.html(response, HttpServletResponse.SC_OK, Html.page(TITLE, body));
                 return;
             }
@@ -541,6 +546,54 @@ final class GraduationsPage extends HttpServlet {
         }
         response.sendRedirect(request.getContextPath() + "/graduations/" + id + "/graduates/" + graduate + "?note="
             + URLEncoder.encode("Сохранено: " + what, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Keeps the corrections the card sent (ADR-0012), or takes one off; a
+     * value not one its field takes refuses the whole form.
+     */
+    private void edit(
+        final String id, final String graduate, final HttpServletRequest request, final HttpServletResponse response
+    ) throws IOException, SQLException {
+        final Registered registered = this.registered(id, response);
+        if (registered == null) {
+            return;
+        }
+        final int number = registered.position(graduate);
+        if (number < 0 || registered.graduation.staging()) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
+        final GraduateRecord record = registered.graduates.get(number);
+        final List<Edits.Edit> edits = registered.edits.getOrDefault(graduate, List.of());
+        final Edits.Changes changes;
+        final String revert = field(request, "revert");
+        if (revert.isEmpty()) {
+            final Map<String, String> form = new HashMap<>();
+            for (final String name : Collections.list(request.getParameterNames())) {
+                form.put(name, request.getParameter(name));
+            }
+            try {
+                changes = Edits.changes(registered.files.get(number), record, registered.plan, edits, form,
+                    Instant.now().toString());
+            } catch (final IllegalArgumentException error) {
+                this.problem(response, record.fullName() + ": " + error.getMessage());
+                return;
+            }
+        } else {
+            final List<Edits.Edit> removed = new ArrayList<>();
+            for (final Edits.Edit edit : edits) {
+                if (edit.id.equals(revert)) {
+                    removed.add(edit);
+                }
+            }
+            changes = new Edits.Changes(List.of(), removed);
+        }
+        new Graduations(this.database).edit(id, graduate, record.fullName(), changes.kept, changes.removed);
+        final String note = changes.kept.isEmpty() && changes.removed.isEmpty() ? "Правок нет: значения как были"
+            : "Правок сохранено: " + changes.kept.size() + ", снято: " + changes.removed.size();
+        response.sendRedirect(request.getContextPath() + "/graduations/" + id + "/graduates/" + graduate + "?note="
+            + URLEncoder.encode(note, StandardCharsets.UTF_8));
     }
 
     private void xml(final String id, final HttpServletResponse response) throws IOException, SQLException {

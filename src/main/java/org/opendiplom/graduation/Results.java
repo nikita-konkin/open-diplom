@@ -40,12 +40,7 @@ public final class Results {
             final Integer grade = Grades.code(record.grade());
             final String text = Cells.text(record.grade());
             if (record.kind() == Kind.COURSE_WORK) {
-                final boolean project = !row.controls().get(PlanRow.COURSE_PROJECTS).isEmpty()
-                    && row.controls().get(PlanRow.COURSE_WORKS).isEmpty();
-                results.add(new ResultRecord(
-                    target.position, ResultRecord.COURSE_WORK,
-                    printed + (project ? " (курсовой проект)" : " (курсовая работа)"), grade, text, null
-                ));
+                results.add(new ResultRecord(target.position, ResultRecord.COURSE_WORK, printed + work(row), grade, text, null));
             } else if (row.credits() != null) {
                 results.add(new ResultRecord(target.position, kind(item), printed, grade, text, row.credits()));
             }
@@ -55,7 +50,15 @@ public final class Results {
         return results;
     }
 
-    private static String kind(final PlanItem item) {
+    /** « (курсовая работа)», or « (курсовой проект)» where the plan has only a project. */
+    static String work(final PlanRow row) {
+        final boolean project = !row.controls().get(PlanRow.COURSE_PROJECTS).isEmpty()
+            && row.controls().get(PlanRow.COURSE_WORKS).isEmpty();
+        return project ? " (курсовой проект)" : " (курсовая работа)";
+    }
+
+    /** The kind of a result on an element: by the section of the plan. */
+    public static String kind(final PlanItem item) {
         switch (item.section()) {
             case PRACTICES:
                 return ResultRecord.PRACTICE;
