@@ -58,7 +58,7 @@ final class Issuing {
         }
         final Stock.Issue issue = registered.issues.get(document.id);
         if (issue != null) {
-            return "выдан " + date(issue.handed);
+            return "выдан";
         }
         final List<String> printed = new ArrayList<>();
         for (final String kind : kinds(document)) {
@@ -139,10 +139,9 @@ final class Issuing {
         final List<String> handable = handable(registered);
         if (!handable.isEmpty()) {
             html.append("<form method=\"post\" action=\"graduations/").append(id).append("/issue\">")
-                .append("<label>Выданы лично — все напечатанные и не выданные (").append(handable.size())
-                .append("); дата</label><input type=\"date\" name=\"handed\" required>")
-                .append(" <button>Записать выдачу</button></form><p class=\"muted\">По доверенности и почтой — ")
-                .append("в карточке выпускника.</p>");
+                .append("<button>Выданы лично — все напечатанные и не выданные (").append(handable.size())
+                .append(")</button></form><p class=\"muted\">По доверенности и почтой — в карточке выпускника. ")
+                .append("Дата выдачи — та, что на бланке.</p>");
         }
         return html.append("</section>").toString();
     }
@@ -205,13 +204,11 @@ final class Issuing {
             }
             html.append("</table>");
             if (issue != null) {
-                html.append("<p>Выдан ").append(Html.escape(date(issue.handed))).append(", ")
-                    .append(Html.escape(issue.text())).append(".</p>").append(form(action, "cancel", document.id, ""))
+                html.append("<p>Выдан ").append(Html.escape(issue.text())).append(".</p>").append(form(action, "cancel", document.id, ""))
                     .append("<button>Отменить запись о выдаче</button></form>");
             } else if (all) {
                 html.append(form(action, "issue", document.id, ""))
-                    .append("<label>Дата выдачи</label><input type=\"date\" name=\"handed\" value=\"")
-                    .append(Html.escape(document.issueDate)).append("\" required><label>Как выдан (п. 29 приказа № 670)</label>")
+                    .append("<label>Как выдан (п. 29 приказа № 670)</label>")
                     .append("<select name=\"way\">");
                 for (final Map.Entry<String, String> way : Stock.WAYS.entrySet()) {
                     html.append("<option value=\"").append(way.getKey()).append("\">").append(Html.escape(way.getValue()))
@@ -262,7 +259,7 @@ final class Issuing {
         throws IOException, SQLException {
         final List<String> handable = handable(registered);
         try {
-            new Stock(this.database).issue(registered.graduation.id, handable, field(request, "handed"), Stock.PERSON, "");
+            new Stock(this.database).issue(registered.graduation.id, handable, Stock.PERSON, "");
         } catch (final IllegalArgumentException error) {
             Responses.problem(response, TITLE, error.getMessage());
             return;
@@ -311,8 +308,7 @@ final class Issuing {
                     note = "Бланк " + used.label() + " отмечен испорченным; документ можно напечатать заново";
                 }
             } else if ("issue".equals(action)) {
-                stock.issue(id, List.of(document.id), field(request, "handed"), field(request, "way"),
-                    field(request, "details"));
+                stock.issue(id, List.of(document.id), field(request, "way"), field(request, "details"));
                 note = "Выдача записана";
             } else if ("cancel".equals(action)) {
                 stock.cancel(id, document.id);

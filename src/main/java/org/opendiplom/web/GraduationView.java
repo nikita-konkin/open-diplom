@@ -204,7 +204,8 @@ final class GraduationView {
             .append("<label>Регистрационные номера — подряд или с пропусками: «10001–10007, 10010». ")
             .append("Получат выпускники без номера, по порядку списка</label>")
             .append("<input type=\"text\" name=\"numbers\">")
-            .append("<label>Дата выдачи — для всех документов выпуска</label><input type=\"date\" name=\"issue_date\">")
+            .append("<label>Дата выдачи — общая для выпуска, печатается на бланках</label>")
+            .append("<input type=\"date\" name=\"issue_date\">")
             .append("<br><button>Присвоить</button></form></section>");
         return html.toString();
     }
@@ -219,11 +220,12 @@ final class GraduationView {
         final String current = original.honors == null ? "" : original.honors ? "1" : "0";
         final StringBuilder html = new StringBuilder("<section><h2>Документ</h2><p class=\"muted\">")
             .append("Диплом и приложение: один регистрационный номер и одна дата выдачи.</p>")
+            .append("<p>Дата выдачи: ").append(original.issueDate.isEmpty() ? "не задана"
+                : Html.escape(Issuing.date(original.issueDate))).append(" — общая для выпуска, задаётся на <a href=\"graduations/")
+            .append(graduation).append("\">странице выпуска</a>.</p>")
             .append("<form method=\"post\" action=\"").append(action).append("\">")
             .append("<label>Регистрационный номер</label><input type=\"text\" name=\"reg_number\" value=\"")
             .append(Html.escape(original.regNumber)).append("\">")
-            .append("<label>Дата выдачи</label><input type=\"date\" name=\"issue_date\" value=\"")
-            .append(Html.escape(original.issueDate)).append("\">")
             .append("<label>С отличием (п. 27 приказа № 670): ").append(Html.escape(rule.explanation)).append("</label>")
             .append("<select name=\"honors\">")
             .append(option("", "по расчёту: " + proposal, current))

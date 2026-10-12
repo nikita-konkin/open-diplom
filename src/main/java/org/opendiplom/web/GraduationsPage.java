@@ -22,6 +22,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.opendiplom.catalog.Checks;
@@ -399,6 +400,16 @@ final class GraduationsPage extends HttpServlet {
         body.append("</section><section><h2>Выпускники: ").append(registered.graduates.size()).append("</h2>")
             .append(GraduationView.graduates(id, registered.graduates, registered.findings, registered.originals,
                 registered.honors, registered.printing, Issuing.states(registered))).append("</section>");
+        final Set<String> dates = new TreeSet<>();
+        for (final DocumentRecord original : registered.originals) {
+            if (!original.issueDate.isEmpty()) {
+                dates.add(original.issueDate);
+            }
+        }
+        if (dates.size() > 1) {
+            body.append("<section class=\"note\">Даты выдачи у выпускников разные: ").append(Html.escape(String.join(", ",
+                dates))).append(". Дата выдачи общая для выпуска: задайте её ниже, в разделе «Документы».</section>");
+        }
         body.append(GraduationView.documents(id, registered.organization, registered.printing, request.getParameter("note"),
             mixed(registered)));
         body.append(new Issuing(this.database).graduation(registered));
@@ -542,12 +553,14 @@ final class GraduationsPage extends HttpServlet {
             );
             what = document.duplicateTitle() + " № " + reg + " взамен № " + original.regNumber;
         } else {
+            // the date of issue is common to the graduation and set on its page (ADR-0013)
             final String honors = field(request, "honors");
             document = new DocumentRecord(
-                original.id, graduate, null, false, false, reg, date, honors.isEmpty() ? null : "1".equals(honors)
+                original.id, graduate, null, false, false, reg, original.issueDate,
+                honors.isEmpty() ? null : "1".equals(honors)
             );
-            what = "№ " + (reg.isEmpty() ? "—" : reg) + ", дата выдачи " + (date.isEmpty() ? "—" : date)
-                + ", «с отличием»: " + (document.honors == null ? "по расчёту" : document.honors ? "да" : "нет");
+            what = "№ " + (reg.isEmpty() ? "—" : reg) + ", «с отличием»: "
+                + (document.honors == null ? "по расчёту" : document.honors ? "да" : "нет");
         }
         try {
             new Documents(this.database).save(id, document, what);

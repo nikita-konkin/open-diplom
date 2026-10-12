@@ -211,17 +211,17 @@ public final class Stock {
         }
     }
 
-    /** How a document was handed. */
+    /**
+     * How a document was handed. Its date of issue is the one printed on the
+     * blank, common to the graduation: the day it was taken is not kept.
+     */
     public static final class Issue {
         public final String documentId;
-        /** ГГГГ-ММ-ДД. */
-        public final String handed;
         public final String way;
         public final String details;
 
-        Issue(final String documentId, final String handed, final String way, final String details) {
+        Issue(final String documentId, final String way, final String details) {
             this.documentId = documentId;
-            this.handed = handed;
             this.way = way;
             this.details = details;
         }
@@ -428,8 +428,7 @@ public final class Stock {
             try (ResultSet row = query.executeQuery()) {
                 while (row.next()) {
                     issues.put(row.getString("document_id"), new Issue(
-                        row.getString("document_id"), row.getString("handed"), row.getString("way"),
-                        row.getString("details")
+                        row.getString("document_id"), row.getString("way"), row.getString("details")
                     ));
                 }
             }
@@ -551,18 +550,15 @@ public final class Stock {
     }
 
     /**
-     * Writes how documents of a graduation were handed.
+     * Writes how documents of a graduation were handed; the date kept is the
+     * date of issue on the blank.
      *
      * @param details the number and date of the power of attorney or of the postal item; empty when handed in person
      * @throws IllegalArgumentException when a document is not on all its blanks or handed already
      */
     public void issue(
-        final String graduationId, final List<String> documentIds, final String handed, final String way,
-        final String details
+        final String graduationId, final List<String> documentIds, final String way, final String details
     ) throws SQLException {
-        if (!DATE.matcher(handed).matches()) {
-            throw new IllegalArgumentException("Дата выдачи «" + handed + "»: нужна дата ГГГГ-ММ-ДД");
-        }
         if (!WAYS.containsKey(way)) {
             throw new IllegalArgumentException("Способ выдачи «" + way + "» не известен");
         }
@@ -588,19 +584,19 @@ public final class Stock {
                         + String.join(", ", titles(missing)) + ". Выдача записывается после записи бланков");
                 }
                 try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO document_issue (document_id, handed, way, details, created_at) VALUES (?, ?, ?, ?, ?)"
+                    "INSERT INTO document_issue (document_id, handed, way, details, created_at) "
+                        + "SELECT id, issue_date, ?, ?, ? FROM document WHERE id = ?"
                 )) {
-                    insert.setString(1, document);
-                    insert.setString(2, handed);
-                    insert.setString(3, way);
-                    insert.setString(4, text);
-                    insert.setString(5, Instant.now().toString());
+                    insert.setString(4, document);
+                    insert.setString(1, way);
+                    insert.setString(2, text);
+                    insert.setString(3, Instant.now().toString());
                     insert.executeUpdate();
                 }
                 numbers.add(number);
             }
             if (!numbers.isEmpty()) {
-                Graduations.audit(connection, graduationId, ISSUE, "выданы " + handed + " " + WAYS.get(way)
+                Graduations.audit(connection, graduationId, ISSUE, "выданы " + WAYS.get(way)
                     + (text.isEmpty() ? "" : " " + text) + ": № " + String.join(", ", numbers));
             }
             connection.commit();

@@ -127,7 +127,7 @@ final class BookPage extends HttpServlet {
                         registered.fields.getOrDefault("qualification", "") + "; " + Issuing.date(graduate.gekDate)
                             + ", протокол № " + graduate.gekProtocol,
                         "",
-                        issue == null ? "" : issue.text() + ", " + Issuing.date(issue.handed),
+                        issue == null ? "" : issue.text(),
                     });
                 }
             }

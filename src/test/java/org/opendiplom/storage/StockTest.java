@@ -215,7 +215,7 @@ final class StockTest {
         assertThrows(IllegalArgumentException.class, () -> this.graduations.edit(graduation, original.graduateId,
             "Андреев", List.of(edit("thesis_topic", "Связь", "Тема")), List.of()),
             "The topic of the thesis changed under a printed supplement");
-        this.stock.issue(graduation, List.of(original.id), "2026-07-03", Stock.PERSON, "");
+        this.stock.issue(graduation, List.of(original.id), Stock.PERSON, "");
         this.graduations.edit(graduation, original.graduateId, "Андреев", List.of(edit("gek_protocol", "7", "3")),
             List.of());
         assertEquals(2, this.graduations.edits(graduation).get(original.graduateId).size(),
@@ -230,19 +230,19 @@ final class StockTest {
         final DocumentRecord original = this.originals(graduation).get(0);
         this.stock.record(graduation, original.id, DIPLOMA, SERIES, "0000101");
         final IllegalArgumentException unprinted = assertThrows(IllegalArgumentException.class,
-            () -> this.stock.issue(graduation, List.of(original.id), "2026-07-03", Stock.PERSON, ""),
+            () -> this.stock.issue(graduation, List.of(original.id), Stock.PERSON, ""),
             "A document without its supplement was handed");
         assertTrue(unprinted.getMessage().contains("приложение"), "The blank missing is not named: "
             + unprinted.getMessage());
         this.stock.record(graduation, original.id, SUPPLEMENT, SERIES, "0000201");
         assertThrows(IllegalArgumentException.class,
-            () -> this.stock.issue(graduation, List.of(original.id), "2026-07-03", Stock.ATTORNEY, ""),
+            () -> this.stock.issue(graduation, List.of(original.id), Stock.ATTORNEY, ""),
             "A document was handed by a power of attorney without its number and date");
-        this.stock.issue(graduation, List.of(original.id), "2026-07-05", Stock.ATTORNEY, "№ 12 от 01.07.2026");
-        assertEquals("2026-07-05 по доверенности № 12 от 01.07.2026", this.stock.issues(graduation).get(original.id).handed
-            + " " + this.stock.issues(graduation).get(original.id).text(), "The handing was not kept as written");
+        this.stock.issue(graduation, List.of(original.id), Stock.ATTORNEY, "№ 12 от 01.07.2026");
+        assertEquals("по доверенности № 12 от 01.07.2026", this.stock.issues(graduation).get(original.id).text(),
+            "The handing was not kept as written");
         assertThrows(IllegalArgumentException.class,
-            () -> this.stock.issue(graduation, List.of(original.id), "2026-07-06", Stock.PERSON, ""),
+            () -> this.stock.issue(graduation, List.of(original.id), Stock.PERSON, ""),
             "A document was handed twice");
         assertThrows(IllegalArgumentException.class, () -> this.stock.spoil(DIPLOMA, SERIES, "0000101", "ошибка"),
             "The blank of a handed document was spoiled");

@@ -220,7 +220,7 @@ final class GraduationsPageTest {
         );
         final Matcher card = Pattern.compile("graduations/[0-9a-f-]{36}/graduates/[0-9a-f-]{36}").matcher(page);
         assertTrue(card.find(), "No card of a graduate on the page");
-        this.post(card.group(), Map.of("reg_number", "10001", "issue_date", "2026-07-03", "honors", "0"));
+        this.post(card.group(), Map.of("reg_number", "10001", "issue_date", "2026-07-09", "honors", "0"));
         this.post(card.group() + "/duplicate",
             Map.of("kind", "supplement", "reg_number", "10020", "issue_date", "2026-09-01"));
         final String cardPage = this.get(card.group()).body();
@@ -229,6 +229,8 @@ final class GraduationsPageTest {
                 && cardPage.contains("<td>дубликат приложения</td><td>10020</td><td>2026-09-01</td>"),
             "The operator's decision on honors went without a word, or the duplicate was not issued: " + cardPage
         );
+        assertTrue(cardPage.contains("Дата выдачи: 03.07.2026 — общая для выпуска"),
+            "The card gave one graduate a date of issue other than the graduation's: " + cardPage);
         assertEquals(
             400, this.post(card.group(), Map.of("reg_number", "10010", "issue_date", "2026-07-03")).statusCode(),
             "The number of another graduate was taken"
